@@ -1,0 +1,140 @@
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-school_erp}
+      MYSQL_USER: ${MYSQL_USER:-school_erp}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      NACOS_DB_NAME: ${NACOS_DB_NAME:-nacos_config}
+      NACOS_DB_USER: ${NACOS_DB_USER:-nacos}
+      NACOS_DB_PASSWORD: ${NACOS_DB_PASSWORD:?NACOS_DB_PASSWORD is required}
+    ports:
+      - "${MYSQL_BIND_IP:-127.0.0.1}:${MYSQL_EXPOSE_PORT:-18110}:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - middleware-core
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-school_erp}
+      POSTGRES_USER: ${POSTGRES_USER:-school_erp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    ports:
+      - "${POSTGRES_BIND_IP:-127.0.0.1}:${POSTGRES_EXPOSE_PORT:-18111}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - middleware-core
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["sh", "-c", "redis-server /usr/local/etc/redis/redis.conf --requirepass \"$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    ports:
+      - "${REDIS_BIND_IP:-127.0.0.1}:${REDIS_EXPOSE_PORT:-18112}:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    volumes:
+      - redis-data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - middleware-core
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-school_erp}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_DEFAULT_VHOST:-school-erp}
+    ports:
+      - "${RABBITMQ_AMQP_BIND_IP:-127.0.0.1}:${RABBITMQ_AMQP_PORT:-18113}:5672"
+      - "${RABBITMQ_MANAGEMENT_BIND_IP:-127.0.0.1}:${RABBITMQ_MANAGEMENT_PORT:-18114}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - middleware-core
+
+  nacos:
+    image: nacos/nacos-server:v2.5.1
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MODE: standalone
+      SPRING_DATASOURCE_PLATFORM: mysql
+      MYSQL_SERVICE_HOST: mysql
+      MYSQL_SERVICE_PORT: 3306
+      MYSQL_SERVICE_DB_NAME: ${NACOS_DB_NAME:-nacos_config}
+      MYSQL_SERVICE_USER: ${NACOS_DB_USER:-nacos}
+      MYSQL_SERVICE_PASSWORD: ${NACOS_DB_PASSWORD:?NACOS_DB_PASSWORD is required}
+      MYSQL_SERVICE_DB_PARAM: characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useUnicode=true&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      NACOS_AUTH_ENABLE: "true"
+      NACOS_AUTH_TOKEN: ${NACOS_AUTH_TOKEN:?NACOS_AUTH_TOKEN is required}
+      NACOS_AUTH_IDENTITY_KEY: ${NACOS_AUTH_IDENTITY_KEY:-serverIdentity}
+      NACOS_AUTH_IDENTITY_VALUE: ${NACOS_AUTH_IDENTITY_VALUE:?NACOS_AUTH_IDENTITY_VALUE is required}
+      JVM_XMS: 256m
+      JVM_XMX: 256m
+      JVM_XMN: 128m
+    ports:
+      - "${NACOS_HTTP_BIND_IP:-127.0.0.1}:${NACOS_HTTP_PORT:-18115}:8848"
+      - "${NACOS_GRPC_BIND_IP:-127.0.0.1}:${NACOS_GRPC_PORT:-18116}:9848"
+      - "${NACOS_RAFT_BIND_IP:-127.0.0.1}:${NACOS_RAFT_PORT:-18117}:9849"
+    volumes:
+      - nacos-logs:/home/nacos/logs
+      - nacos-data:/home/nacos/data
+    networks:
+      - middleware-core
+
+networks:
+  middleware-core:
+    name: school-erp-middleware-net
+    driver: bridge
+
+volumes:
+  mysql-data:
+    name: school-erp-middleware-mysql-data
+  postgres-data:
+    name: school-erp-middleware-postgres-data
+  redis-data:
+    name: school-erp-middleware-redis-data
+  rabbitmq-data:
+    name: school-erp-middleware-rabbitmq-data
+  nacos-logs:
+    name: school-erp-middleware-nacos-logs
+  nacos-data:
+    name: school-erp-middleware-nacos-data

@@ -1,0 +1,58 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  profiles:
+    default: standalone
+  application:
+    name: gateway-service
+  cloud:
+    gateway:
+      routes:
+        - id: auth-service
+          uri: ${AUTH_SERVICE_URI:lb://auth-service}
+          predicates:
+            - Path=/api/v1/auth/**
+        - id: master-service
+          uri: ${MASTER_SERVICE_URI:lb://master-service}
+          predicates:
+            - Path=/api/v1/master/**
+        - id: academic-service
+          uri: ${ACADEMIC_SERVICE_URI:lb://academic-service}
+          predicates:
+            - Path=/api/v1/academic/**
+        - id: workflow-service
+          uri: ${WORKFLOW_SERVICE_URI:lb://workflow-service}
+          predicates:
+            - Path=/api/v1/workflow/**
+        - id: billing-service
+          uri: ${BILLING_SERVICE_URI:lb://billing-service}
+          predicates:
+            - Path=/api/v1/billing/**
+        - id: notify-service
+          uri: ${NOTIFY_SERVICE_URI:lb://notify-service}
+          predicates:
+            - Path=/api/v1/notify/**
+      globalcors:
+        corsConfigurations:
+          '[/**]':
+            allowedOrigins:
+              - ${CORS_ALLOWED_ORIGIN:http://localhost:5173}
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+              - OPTIONS
+            allowedHeaders:
+              - '*'
+            exposedHeaders:
+              - X-Request-Id
+            allowCredentials: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway

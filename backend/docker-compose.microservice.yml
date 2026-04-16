@@ -1,0 +1,158 @@
+x-common-env: &common-env
+  SPRING_PROFILES_ACTIVE: microservice
+  NACOS_SERVER_ADDR: ${NACOS_SERVER_ADDR:-nacos:8848}
+  NACOS_USERNAME: ${NACOS_USERNAME:-nacos}
+  NACOS_PASSWORD: ${NACOS_PASSWORD:-nacos}
+  NACOS_DISCOVERY_ENABLED: ${NACOS_DISCOVERY_ENABLED:-true}
+  NACOS_CONFIG_ENABLED: ${NACOS_CONFIG_ENABLED:-false}
+  NACOS_NAMESPACE: ${NACOS_NAMESPACE:-}
+  NACOS_DISCOVERY_GROUP: ${NACOS_DISCOVERY_GROUP:-DEFAULT_GROUP}
+  NACOS_CONFIG_GROUP: ${NACOS_CONFIG_GROUP:-DEFAULT_GROUP}
+  POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+  POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+  POSTGRES_DB: ${POSTGRES_DB:-school_erp}
+  POSTGRES_USER: ${POSTGRES_USER:-school_erp}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+  RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+  RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+  RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-school_erp}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+  RABBITMQ_VHOST: ${RABBITMQ_VHOST:-school-erp}
+
+services:
+  gateway-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        APP_JAR: gateway-service/target/app.jar
+    image: school-erp/gateway-service:microservice
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_BIND_IP:-0.0.0.0}:${GATEWAY_EXPOSE_PORT:-18080}:8080"
+    environment:
+      <<: *common-env
+      SERVER_PORT: 8080
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-http://localhost:5173}
+    depends_on:
+      - auth-service
+      - master-service
+      - academic-service
+      - workflow-service
+      - billing-service
+      - notify-service
+    networks:
+      - backend-core
+      - middleware-core
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        APP_JAR: auth-service/target/app.jar
+    image: school-erp/auth-service:microservice
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SERVER_PORT: 8081
+    expose:
+      - "8081"
+    networks:
+      - backend-core
+      - middleware-core
+
+  master-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        APP_JAR: master-service/target/app.jar
+    image: school-erp/master-service:microservice
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SERVER_PORT: 8082
+    expose:
+      - "8082"
+    networks:
+      - backend-core
+      - middleware-core
+
+  academic-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        APP_JAR: academic-service/target/app.jar
+    image: school-erp/academic-service:microservice
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SERVER_PORT: 8083
+    expose:
+      - "8083"
+    networks:
+      - backend-core
+      - middleware-core
+
+  workflow-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        APP_JAR: workflow-service/target/app.jar
+    image: school-erp/workflow-service:microservice
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SERVER_PORT: 8084
+    expose:
+      - "8084"
+    networks:
+      - backend-core
+      - middleware-core
+
+  billing-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        APP_JAR: billing-service/target/app.jar
+    image: school-erp/billing-service:microservice
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SERVER_PORT: 8085
+    expose:
+      - "8085"
+    networks:
+      - backend-core
+      - middleware-core
+
+  notify-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        APP_JAR: notify-service/target/app.jar
+    image: school-erp/notify-service:microservice
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SERVER_PORT: 8086
+    expose:
+      - "8086"
+    networks:
+      - backend-core
+      - middleware-core
+
+networks:
+  backend-core:
+    driver: bridge
+  middleware-core:
+    external: true
+    name: school-erp-middleware-net

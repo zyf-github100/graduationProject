@@ -1,0 +1,35 @@
+server:
+  port: ${SERVER_PORT:8084}
+
+spring:
+  profiles:
+    default: standalone
+  application:
+    name: workflow-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:18111}/${POSTGRES_DB:school_erp}}
+    username: ${SPRING_DATASOURCE_USERNAME:${POSTGRES_USER:school_erp}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${POSTGRES_PASSWORD:school_erp}}
+    driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:18112}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:3}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:127.0.0.1}
+    port: ${RABBITMQ_PORT:18113}
+    username: ${RABBITMQ_USERNAME:school_erp}
+    password: ${RABBITMQ_PASSWORD:school_erp}
+    virtual-host: ${RABBITMQ_VHOST:school-erp}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+school-erp:
+  messaging:
+    enabled: false

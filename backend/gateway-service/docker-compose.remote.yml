@@ -1,0 +1,23 @@
+services:
+  gateway-service:
+    image: school-erp/gateway-service:remote
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_BIND_IP:-0.0.0.0}:${GATEWAY_EXPOSE_PORT:-18080}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      AUTH_SERVICE_URI: ${AUTH_SERVICE_URI:-http://host.docker.internal:18081}
+      MASTER_SERVICE_URI: ${MASTER_SERVICE_URI:-http://host.docker.internal:18082}
+      ACADEMIC_SERVICE_URI: ${ACADEMIC_SERVICE_URI:-http://host.docker.internal:18083}
+      WORKFLOW_SERVICE_URI: ${WORKFLOW_SERVICE_URI:-http://host.docker.internal:18084}
+      BILLING_SERVICE_URI: ${BILLING_SERVICE_URI:-http://host.docker.internal:18085}
+      NOTIFY_SERVICE_URI: ${NOTIFY_SERVICE_URI:-http://host.docker.internal:18086}
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-http://localhost:5173}
+    networks:
+      - gateway-edge
+
+networks:
+  gateway-edge:
+    driver: bridge

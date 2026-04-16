@@ -1,0 +1,24 @@
+server:
+  port: ${SERVER_PORT:8086}
+
+spring:
+  profiles:
+    default: standalone
+  application:
+    name: notify-service
+  rabbitmq:
+    host: ${RABBITMQ_HOST:127.0.0.1}
+    port: ${RABBITMQ_PORT:18113}
+    username: ${RABBITMQ_USERNAME:school_erp}
+    password: ${RABBITMQ_PASSWORD:school_erp}
+    virtual-host: ${RABBITMQ_VHOST:school-erp}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+school-erp:
+  messaging:
+    enabled: false
