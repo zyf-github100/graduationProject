@@ -160,18 +160,27 @@ jobs:
         env:
           BASTION_HOST: ${{ secrets.BASTION_HOST }}
           BASTION_USER: ${{ secrets.BASTION_USER }}
-          BASTION_PASSWORD: ${{ secrets.BASTION_PASSWORD }}
+          BASTION_SSH_PRIVATE_KEY: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
           TARGET_HOST: ${{ secrets.TARGET_HOST }}
           TARGET_USER: ${{ secrets.TARGET_USER }}
         run: |
           missing=0
-          for name in BASTION_HOST BASTION_USER BASTION_PASSWORD TARGET_HOST TARGET_USER; do
+          for name in BASTION_HOST BASTION_USER BASTION_SSH_PRIVATE_KEY TARGET_HOST TARGET_USER; do
             if [ -z "${!name}" ]; then
               echo "::error::Missing required secret $name"
               missing=1
             fi
           done
           exit $missing
+
+      - name: Prepare bastion SSH key
+        env:
+          BASTION_SSH_PRIVATE_KEY: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+        run: |
+          key_path="$RUNNER_TEMP/bastion_ssh_key"
+          printf '%s\n' "$BASTION_SSH_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          echo "JUMP_PRIVATE_KEY_FILE=$key_path" >> "$GITHUB_ENV"
 
       - name: Prepare image metadata
         id: image
@@ -185,7 +194,7 @@ jobs:
 
       - name: Deploy service
         env:
-          JUMP_PASSWORD: ${{ secrets.BASTION_PASSWORD }}
+          JUMP_PRIVATE_KEY_FILE: ${{ env.JUMP_PRIVATE_KEY_FILE }}
           REGISTRY_TOKEN: ${{ secrets.GHCR_TOKEN }}
           GHCR_USERNAME: ${{ github.repository_owner }}
           BASTION_HOST: ${{ secrets.BASTION_HOST }}

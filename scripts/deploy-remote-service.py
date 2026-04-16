@@ -27,6 +27,12 @@ IMAGE_ENV_BY_SERVICE = {
     service: service.upper().replace("-", "_") + "_IMAGE"
     for service in SERVICES
 }
+PRIVATE_KEY_TYPES = (
+    paramiko.Ed25519Key,
+    paramiko.RSAKey,
+    paramiko.ECDSAKey,
+    paramiko.DSSKey,
+)
 
 
 def read_env_text(text: str) -> dict[str, str]:
@@ -48,10 +54,49 @@ def default_image_for(service: str, image_repository_prefix: str) -> str:
     return f"{image_repository_prefix}/{service}:latest"
 
 
-def connect_jump(host: str, port: int, user: str, password: str) -> paramiko.SSHClient:
+def load_private_key_from_text(key_data: str) -> paramiko.PKey:
+    last_error: Exception | None = None
+    for key_type in PRIVATE_KEY_TYPES:
+        try:
+            return key_type.from_private_key(io.StringIO(key_data))
+        except paramiko.PasswordRequiredException as exc:
+            raise SystemExit(
+                "Encrypted SSH private keys are not supported for automated deploys."
+            ) from exc
+        except paramiko.SSHException as exc:
+            last_error = exc
+    raise SystemExit("Unsupported SSH private key format.") from last_error
+
+
+def load_private_key_from_path(path: Path) -> paramiko.PKey:
+    return load_private_key_from_text(path.read_text(encoding="utf-8"))
+
+
+def connect_jump(
+    host: str,
+    port: int,
+    user: str,
+    password: str | None = None,
+    private_key: paramiko.PKey | None = None,
+) -> paramiko.SSHClient:
+    if not password and private_key is None:
+        raise SystemExit("Jump host authentication is required")
+
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(host, port=port, username=user, password=password, timeout=10)
+    connect_kwargs = {
+        "hostname": host,
+        "port": port,
+        "username": user,
+        "timeout": 10,
+        "allow_agent": False,
+        "look_for_keys": False,
+    }
+    if private_key is not None:
+        connect_kwargs["pkey"] = private_key
+    else:
+        connect_kwargs["password"] = password
+    client.connect(**connect_kwargs)
     return client
 
 
@@ -62,7 +107,7 @@ def read_private_key(jump_client: paramiko.SSHClient, key_path: str) -> paramiko
             key_data = fp.read().decode("utf-8")
     finally:
         sftp.close()
-    return paramiko.Ed25519Key.from_private_key(io.StringIO(key_data))
+    return load_private_key_from_text(key_data)
 
 
 def connect_target(
@@ -176,6 +221,7 @@ def main() -> None:
     parser.add_argument("--jump-host", default="8.148.181.9")
     parser.add_argument("--jump-port", type=int, default=22)
     parser.add_argument("--jump-user", default="root")
+    parser.add_argument("--jump-private-key-file", type=Path)
     parser.add_argument("--jump-key-path", default="/root/.ssh/bridgeability_tunnel")
     parser.add_argument("--target-host", default="36.137.84.162")
     parser.add_argument("--target-port", type=int, default=22)
@@ -195,8 +241,17 @@ def main() -> None:
         raise SystemExit(f"Missing compose file: {args.compose_file}")
 
     jump_password = os.environ.get("JUMP_PASSWORD")
-    if not jump_password:
-        raise SystemExit("JUMP_PASSWORD is required")
+    jump_private_key_file = args.jump_private_key_file
+    env_jump_private_key_file = os.environ.get("JUMP_PRIVATE_KEY_FILE")
+    if env_jump_private_key_file:
+        jump_private_key_file = Path(env_jump_private_key_file)
+
+    jump_private_key = None
+    if jump_private_key_file is not None:
+        jump_private_key = load_private_key_from_path(jump_private_key_file)
+
+    if not jump_password and jump_private_key is None:
+        raise SystemExit("JUMP_PRIVATE_KEY_FILE or JUMP_PASSWORD is required")
 
     if not args.skip_registry_login:
         registry_password = os.environ.get(args.registry_password_env)
@@ -207,7 +262,13 @@ def main() -> None:
     else:
         registry_password = ""
 
-    jump = connect_jump(args.jump_host, args.jump_port, args.jump_user, jump_password)
+    jump = connect_jump(
+        args.jump_host,
+        args.jump_port,
+        args.jump_user,
+        password=jump_password if jump_private_key is None else None,
+        private_key=jump_private_key,
+    )
     try:
         private_key = read_private_key(jump, args.jump_key_path)
         target = connect_target(
