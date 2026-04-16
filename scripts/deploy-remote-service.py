@@ -27,11 +27,15 @@ IMAGE_ENV_BY_SERVICE = {
     service: service.upper().replace("-", "_") + "_IMAGE"
     for service in SERVICES
 }
-PRIVATE_KEY_TYPES = (
-    paramiko.Ed25519Key,
-    paramiko.RSAKey,
-    paramiko.ECDSAKey,
-    paramiko.DSSKey,
+PRIVATE_KEY_TYPES = tuple(
+    key_type
+    for key_type in (
+        getattr(paramiko, "Ed25519Key", None),
+        getattr(paramiko, "RSAKey", None),
+        getattr(paramiko, "ECDSAKey", None),
+        getattr(paramiko, "DSSKey", None),
+    )
+    if key_type is not None
 )
 
 
