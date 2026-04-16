@@ -1,0 +1,242 @@
+name: Deploy Backend Microservices
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - "scripts/deploy-remote-service.py"
+      - "scripts/select-backend-services.py"
+      - ".github/workflows/deploy-backend-services.yml"
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Which backend service to deploy
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - all
+          - gateway-service
+          - auth-service
+          - master-service
+          - academic-service
+          - workflow-service
+          - billing-service
+          - notify-service
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-backend-services-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.plan.outputs.services }}
+      has_services: ${{ steps.plan.outputs.has_services }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Determine services to deploy
+        id: plan
+        env:
+          SERVICE_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.service || 'auto' }}
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          services=$(python scripts/select-backend-services.py \
+            --event-name "$GITHUB_EVENT_NAME" \
+            --service-input "$SERVICE_INPUT" \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA")
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+          if [ "$services" = "[]" ]; then
+            echo "has_services=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_services=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-and-push:
+    needs: plan
+    if: needs.plan.outputs.has_services == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.plan.outputs.services) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build service jar
+        working-directory: backend
+        run: mvn -pl "${{ matrix.service }}" -am clean package -DskipTests "-Dapp.finalName=app"
+
+      - name: Prepare image metadata
+        id: image
+        env:
+          SERVICE_NAME: ${{ matrix.service }}
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          prefix="ghcr.io/${owner}/school-erp"
+          sha_image="${prefix}/${SERVICE_NAME}:sha-${GITHUB_SHA}"
+          tags="$sha_image"
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            tags="${tags}"$'\n'"${prefix}/${SERVICE_NAME}:latest"
+          fi
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "sha_image=$sha_image" >> "$GITHUB_OUTPUT"
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$tags" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile.service
+          push: true
+          provenance: false
+          build-args: |
+            APP_JAR=${{ matrix.service }}/target/app.jar
+          tags: ${{ steps.image.outputs.tags }}
+
+  deploy:
+    needs:
+      - plan
+      - build-and-push
+    if: needs.plan.outputs.has_services == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        service: ${{ fromJson(needs.plan.outputs.services) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deploy dependencies
+        run: python -m pip install --upgrade pip paramiko
+
+      - name: Validate deploy secrets
+        env:
+          BASTION_HOST: ${{ secrets.BASTION_HOST }}
+          BASTION_USER: ${{ secrets.BASTION_USER }}
+          BASTION_PASSWORD: ${{ secrets.BASTION_PASSWORD }}
+          TARGET_HOST: ${{ secrets.TARGET_HOST }}
+          TARGET_USER: ${{ secrets.TARGET_USER }}
+        run: |
+          missing=0
+          for name in BASTION_HOST BASTION_USER BASTION_PASSWORD TARGET_HOST TARGET_USER; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret $name"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Prepare image metadata
+        id: image
+        env:
+          SERVICE_NAME: ${{ matrix.service }}
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          prefix="ghcr.io/${owner}/school-erp"
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "sha_image=${prefix}/${SERVICE_NAME}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy service
+        env:
+          JUMP_PASSWORD: ${{ secrets.BASTION_PASSWORD }}
+          REGISTRY_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USERNAME: ${{ github.repository_owner }}
+          BASTION_HOST: ${{ secrets.BASTION_HOST }}
+          BASTION_PORT: ${{ secrets.BASTION_PORT }}
+          BASTION_USER: ${{ secrets.BASTION_USER }}
+          TARGET_HOST: ${{ secrets.TARGET_HOST }}
+          TARGET_PORT: ${{ secrets.TARGET_PORT }}
+          TARGET_USER: ${{ secrets.TARGET_USER }}
+          TARGET_SSH_KEY_PATH: ${{ secrets.TARGET_SSH_KEY_PATH }}
+          BACKEND_REMOTE_DIR: ${{ secrets.BACKEND_REMOTE_DIR }}
+          BACKEND_COMPOSE_PROJECT: ${{ secrets.BACKEND_COMPOSE_PROJECT }}
+          BACKEND_REMOTE_ENV_FILE: ${{ secrets.BACKEND_REMOTE_ENV_FILE }}
+          BACKEND_REMOTE_COMPOSE_FILE: ${{ secrets.BACKEND_REMOTE_COMPOSE_FILE }}
+        run: |
+          args=(
+            --service "${{ matrix.service }}"
+            --image "${{ steps.image.outputs.sha_image }}"
+            --image-repository-prefix "${{ steps.image.outputs.prefix }}"
+            --jump-host "$BASTION_HOST"
+            --jump-user "$BASTION_USER"
+            --target-host "$TARGET_HOST"
+            --target-user "$TARGET_USER"
+            --registry ghcr.io
+          )
+
+          if [ -n "$REGISTRY_TOKEN" ]; then
+            args+=(--registry-username "$GHCR_USERNAME")
+          else
+            args+=(--skip-registry-login)
+          fi
+
+          if [ -n "$BASTION_PORT" ]; then
+            args+=(--jump-port "$BASTION_PORT")
+          fi
+          if [ -n "$TARGET_PORT" ]; then
+            args+=(--target-port "$TARGET_PORT")
+          fi
+          if [ -n "$TARGET_SSH_KEY_PATH" ]; then
+            args+=(--jump-key-path "$TARGET_SSH_KEY_PATH")
+          fi
+          if [ -n "$BACKEND_REMOTE_DIR" ]; then
+            args+=(--remote-dir "$BACKEND_REMOTE_DIR")
+          fi
+          if [ -n "$BACKEND_COMPOSE_PROJECT" ]; then
+            args+=(--compose-project-name "$BACKEND_COMPOSE_PROJECT")
+          fi
+          if [ -n "$BACKEND_REMOTE_ENV_FILE" ]; then
+            args+=(--remote-env-file "$BACKEND_REMOTE_ENV_FILE")
+          fi
+          if [ -n "$BACKEND_REMOTE_COMPOSE_FILE" ]; then
+            args+=(--remote-compose-file "$BACKEND_REMOTE_COMPOSE_FILE")
+          fi
+
+          python scripts/deploy-remote-service.py "${args[@]}"
