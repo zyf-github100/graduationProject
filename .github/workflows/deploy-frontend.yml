@@ -1,0 +1,121 @@
+name: Deploy Frontend
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - "infra/remote-frontend/**"
+      - "scripts/deploy-remote-frontend.py"
+      - "scripts/ssh_jump_auth.py"
+      - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-frontend-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install deploy dependencies
+        run: python -m pip install --upgrade pip paramiko
+
+      - name: Validate deploy secrets
+        env:
+          BASTION_HOST: ${{ secrets.BASTION_HOST }}
+          BASTION_USER: ${{ secrets.BASTION_USER }}
+          BASTION_SSH_PRIVATE_KEY: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          TARGET_HOST: ${{ secrets.TARGET_HOST }}
+          TARGET_USER: ${{ secrets.TARGET_USER }}
+        run: |
+          missing=0
+          for name in BASTION_HOST BASTION_USER BASTION_SSH_PRIVATE_KEY TARGET_HOST TARGET_USER; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret $name"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Prepare bastion SSH key
+        env:
+          BASTION_SSH_PRIVATE_KEY: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+        run: |
+          key_path="$RUNNER_TEMP/bastion_ssh_key"
+          printf '%s\n' "$BASTION_SSH_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          echo "JUMP_PRIVATE_KEY_FILE=$key_path" >> "$GITHUB_ENV"
+
+      - name: Deploy frontend
+        env:
+          JUMP_PRIVATE_KEY_FILE: ${{ env.JUMP_PRIVATE_KEY_FILE }}
+          BASTION_HOST: ${{ secrets.BASTION_HOST }}
+          BASTION_PORT: ${{ secrets.BASTION_PORT }}
+          BASTION_USER: ${{ secrets.BASTION_USER }}
+          TARGET_HOST: ${{ secrets.TARGET_HOST }}
+          TARGET_PORT: ${{ secrets.TARGET_PORT }}
+          TARGET_USER: ${{ secrets.TARGET_USER }}
+          TARGET_SSH_KEY_PATH: ${{ secrets.TARGET_SSH_KEY_PATH }}
+          FRONTEND_REMOTE_DIR: ${{ secrets.FRONTEND_REMOTE_DIR }}
+          FRONTEND_COMPOSE_PROJECT: ${{ secrets.FRONTEND_COMPOSE_PROJECT }}
+          FRONTEND_BIND_IP: ${{ secrets.FRONTEND_BIND_IP }}
+          FRONTEND_EXPOSE_PORT: ${{ secrets.FRONTEND_EXPOSE_PORT }}
+          BASTION_FRONTEND_PORT: ${{ secrets.BASTION_FRONTEND_PORT }}
+        run: |
+          args=(
+            --jump-host "$BASTION_HOST"
+            --jump-user "$BASTION_USER"
+            --target-host "$TARGET_HOST"
+            --target-user "$TARGET_USER"
+          )
+
+          if [ -n "$BASTION_PORT" ]; then
+            args+=(--jump-port "$BASTION_PORT")
+          fi
+          if [ -n "$TARGET_PORT" ]; then
+            args+=(--target-port "$TARGET_PORT")
+          fi
+          if [ -n "$TARGET_SSH_KEY_PATH" ]; then
+            args+=(--jump-key-path "$TARGET_SSH_KEY_PATH")
+          fi
+          if [ -n "$FRONTEND_REMOTE_DIR" ]; then
+            args+=(--remote-dir "$FRONTEND_REMOTE_DIR")
+          fi
+          if [ -n "$FRONTEND_COMPOSE_PROJECT" ]; then
+            args+=(--compose-project-name "$FRONTEND_COMPOSE_PROJECT")
+          fi
+          if [ -n "$FRONTEND_BIND_IP" ]; then
+            args+=(--frontend-bind-ip "$FRONTEND_BIND_IP")
+          fi
+          if [ -n "$FRONTEND_EXPOSE_PORT" ]; then
+            args+=(--frontend-expose-port "$FRONTEND_EXPOSE_PORT")
+          fi
+          if [ -n "$BASTION_FRONTEND_PORT" ]; then
+            args+=(--bastion-frontend-port "$BASTION_FRONTEND_PORT")
+          fi
+
+          python scripts/deploy-remote-frontend.py "${args[@]}"

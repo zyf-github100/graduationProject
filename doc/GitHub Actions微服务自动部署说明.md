@@ -19,6 +19,11 @@
 - 单服务远端部署脚本：`scripts/deploy-remote-service.py`
 - 运行时 Compose：`backend/docker-compose.microservice.runtime.yml`
 
+前端自动部署已拆分为独立 Workflow 和独立说明：
+
+- Workflow：`.github/workflows/deploy-frontend.yml`
+- 说明文档：`doc/GitHub Actions前端自动部署说明.md`
+
 ## 3. 触发规则
 
 ### 3.1 Push 自动触发
@@ -56,6 +61,20 @@ Workflow 会先根据改动范围决定要发布哪些服务：
 - `workflow-service`
 - `billing-service`
 - `notify-service`
+
+### 3.4 新增微服务时的接入要求
+
+这套流程目前不是“新建一个 `backend/xxx-service` 目录后零配置自动接入”。
+
+如果仓库中新增了一个微服务，第一次要先把它接入这条发布链路，至少包括：
+
+1. 在 `scripts/select-backend-services.py` 的 `SERVICES` 中加入该服务名，让变更识别脚本能选中它。
+2. 在 `scripts/deploy-remote-service.py` 的 `SERVICES` 中加入该服务名，让远端部署脚本能为它维护镜像环境变量。
+3. 在 `.github/workflows/deploy-backend-services.yml` 的 `workflow_dispatch` 可选项中加入该服务名，保证手动触发时也能单独发布它。
+4. 在 `backend/docker-compose.microservice.runtime.yml` 中加入该服务的运行配置，并补齐端口、依赖和环境变量。
+5. 在目标机现有运行环境文件 `.env` 中补齐该服务对应的镜像变量，例如 `XXX_SERVICE_IMAGE=...`。
+
+完成这次接入后，后续只要改动 `backend/<service-name>/**` 并推送到 `main`，它就会像当前已接入的服务一样自动构建、推镜像并部署。
 
 ## 4. 镜像命名规则
 
@@ -113,8 +132,7 @@ backend/docker-compose.microservice.runtime.yml
 这一步仍然通过当前全量部署脚本完成：
 
 ```powershell
-$env:JUMP_PASSWORD='...'
-.\scripts\deploy-remote-backend-full.ps1 -StopLegacyGateway
+.\scripts\deploy-remote-backend-full.ps1 -JumpPrivateKeyFile <local-key-path> -StopLegacyGateway
 ```
 
 自动化部署是在这之后接管“单个微服务更新”。
@@ -133,6 +151,8 @@ $env:JUMP_PASSWORD='...'
 - `BASTION_SSH_PRIVATE_KEY` 存的是 GitHub Actions Runner 用来登录跳板机的私钥全文。
 - 需要和跳板机 `/root/.ssh/authorized_keys` 中已写入的公钥配对。
 - 当前跳板机已经关闭 SSH 密码登录，因此这里不能再用 `BASTION_PASSWORD`。
+- 仓库说明文档只记录 Secret 的名称和用途，不记录 Secret 当前值，也不记录最后更新时间。
+- 如果需要确认 `BASTION_SSH_PRIVATE_KEY` 是否已经更新，应直接到 GitHub 仓库的 Secrets 页面查看，或执行 `gh secret list --repo <owner>/<repo>` 查询实时状态。
 
 ### 7.2 目标机
 
@@ -223,8 +243,7 @@ docker compose up -d --no-deps auth-service
 
 1. 自动健康检查失败回滚
 2. 多环境区分，例如 `dev / test / prod`
-3. 前端自动部署
-4. Nacos 配置自动下发
-5. 数据库迁移版本化
+3. Nacos 配置自动下发
+4. 数据库迁移版本化
 
 所以当前阶段，它是“可用的持续部署基础版”，不是完整生产发布平台。

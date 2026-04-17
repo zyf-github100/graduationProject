@@ -1,11 +1,15 @@
 import argparse
-import io
 import os
 import secrets
 import string
 from pathlib import Path
 
 import paramiko
+from ssh_jump_auth import (
+    connect_jump,
+    load_private_key_from_path,
+    read_private_key_from_jump,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -65,23 +69,6 @@ def ensure_env_file(path: Path) -> Path:
     lines = [f"{key}={value}" for key, value in env_data.items()]
     path.write_text("\n".join(lines) + "\n", encoding="ascii")
     return path
-
-
-def connect_jump(host: str, port: int, user: str, password: str) -> paramiko.SSHClient:
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(host, port=port, username=user, password=password, timeout=10)
-    return client
-
-
-def read_private_key(jump_client: paramiko.SSHClient, key_path: str) -> paramiko.Ed25519Key:
-    sftp = jump_client.open_sftp()
-    try:
-        with sftp.open(key_path, "r") as fp:
-            key_data = fp.read().decode("utf-8")
-    finally:
-        sftp.close()
-    return paramiko.Ed25519Key.from_private_key(io.StringIO(key_data))
 
 
 def connect_target(
@@ -146,6 +133,7 @@ def main() -> None:
     parser.add_argument("--jump-host", default="8.148.181.9")
     parser.add_argument("--jump-port", type=int, default=22)
     parser.add_argument("--jump-user", default="root")
+    parser.add_argument("--jump-private-key-file", type=Path)
     parser.add_argument("--jump-key-path", default="/root/.ssh/bridgeability_tunnel")
     parser.add_argument("--target-host", default="36.137.84.162")
     parser.add_argument("--target-port", type=int, default=22)
@@ -157,13 +145,28 @@ def main() -> None:
     args = parser.parse_args()
 
     jump_password = os.environ.get("JUMP_PASSWORD")
-    if not jump_password:
-        raise SystemExit("JUMP_PASSWORD is required")
+    jump_private_key_file = args.jump_private_key_file
+    env_jump_private_key_file = os.environ.get("JUMP_PRIVATE_KEY_FILE")
+    if env_jump_private_key_file:
+        jump_private_key_file = Path(env_jump_private_key_file)
+
+    jump_private_key = None
+    if jump_private_key_file is not None:
+        jump_private_key = load_private_key_from_path(jump_private_key_file)
+
+    if not jump_password and jump_private_key is None:
+        raise SystemExit("JUMP_PRIVATE_KEY_FILE or JUMP_PASSWORD is required")
 
     env_path = ensure_env_file(args.env_file)
-    jump = connect_jump(args.jump_host, args.jump_port, args.jump_user, jump_password)
+    jump = connect_jump(
+        args.jump_host,
+        args.jump_port,
+        args.jump_user,
+        password=jump_password if jump_private_key is None else None,
+        private_key=jump_private_key,
+    )
     try:
-        private_key = read_private_key(jump, args.jump_key_path)
+        private_key = read_private_key_from_jump(jump, args.jump_key_path)
         target = connect_target(
             jump,
             args.target_host,

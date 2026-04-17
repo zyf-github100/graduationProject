@@ -1,5 +1,4 @@
 import argparse
-import io
 import os
 import select
 import signal
@@ -9,6 +8,12 @@ import threading
 import time
 
 import paramiko
+from pathlib import Path
+from ssh_jump_auth import (
+    connect_jump,
+    load_private_key_from_path,
+    read_private_key_from_jump,
+)
 
 
 stop_event = threading.Event()
@@ -62,23 +67,6 @@ def parse_forward(raw):
     return int(remote_port), (local_host, int(local_port))
 
 
-def connect_jump(host, port, user, password):
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(host, port=port, username=user, password=password, timeout=10)
-    return client
-
-
-def read_private_key(jump_client, key_path):
-    sftp = jump_client.open_sftp()
-    try:
-        with sftp.open(key_path, "r") as fp:
-            key_data = fp.read().decode("utf-8")
-    finally:
-        sftp.close()
-    return paramiko.Ed25519Key.from_private_key(io.StringIO(key_data))
-
-
 def connect_target(jump_client, target_host, target_port, target_user, private_key):
     chan = jump_client.get_transport().open_channel(
         "direct-tcpip",
@@ -104,6 +92,7 @@ def main():
     parser.add_argument("--jump-host", required=True)
     parser.add_argument("--jump-port", type=int, default=22)
     parser.add_argument("--jump-user", required=True)
+    parser.add_argument("--jump-private-key-file", type=Path)
     parser.add_argument("--target-host", required=True)
     parser.add_argument("--target-port", type=int, default=22)
     parser.add_argument("--target-user", required=True)
@@ -117,17 +106,32 @@ def main():
     args = parser.parse_args()
 
     jump_password = os.environ.get("JUMP_PASSWORD")
-    if not jump_password:
-        raise SystemExit("JUMP_PASSWORD is required")
+    jump_private_key_file = args.jump_private_key_file
+    env_jump_private_key_file = os.environ.get("JUMP_PRIVATE_KEY_FILE")
+    if env_jump_private_key_file:
+        jump_private_key_file = Path(env_jump_private_key_file)
+
+    jump_private_key = None
+    if jump_private_key_file is not None:
+        jump_private_key = load_private_key_from_path(jump_private_key_file)
+
+    if not jump_password and jump_private_key is None:
+        raise SystemExit("JUMP_PRIVATE_KEY_FILE or JUMP_PASSWORD is required")
 
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
 
     forwards = dict(parse_forward(item) for item in args.forward)
 
-    jump = connect_jump(args.jump_host, args.jump_port, args.jump_user, jump_password)
+    jump = connect_jump(
+        args.jump_host,
+        args.jump_port,
+        args.jump_user,
+        password=jump_password if jump_private_key is None else None,
+        private_key=jump_private_key,
+    )
     log("jump-connected")
-    private_key = read_private_key(jump, args.jump_key_path)
+    private_key = read_private_key_from_jump(jump, args.jump_key_path)
     target = connect_target(
         jump,
         args.target_host,

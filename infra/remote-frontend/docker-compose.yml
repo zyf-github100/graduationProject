@@ -1,0 +1,11 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bridgeability/frontend:remote
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_BIND_IP:-127.0.0.1}:${FRONTEND_EXPOSE_PORT:-18200}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -5,6 +5,7 @@ param(
     [string]$JumpHost = "",
     [int]$JumpPort = 22,
     [string]$JumpUser = "root",
+    [string]$JumpPrivateKeyFile = "",
     [string]$TunnelBindAddress = "0.0.0.0"
 )
 
@@ -14,6 +15,23 @@ Write-Warning "当前脚本仅用于 legacy 远端网关 + 本地业务服务联
 
 if (-not (Get-Command ssh -ErrorAction SilentlyContinue)) {
     throw "Missing required command: ssh"
+}
+
+function Get-JumpSshOptions {
+    if (-not $JumpHost) {
+        return @()
+    }
+
+    if ($JumpPrivateKeyFile) {
+        if (-not (Test-Path $JumpPrivateKeyFile)) {
+            throw "Jump private key file not found: $JumpPrivateKeyFile"
+        }
+        $resolvedKeyPath = (Resolve-Path $JumpPrivateKeyFile).Path
+        $proxyCommand = 'ProxyCommand=ssh -i "{0}" -o IdentitiesOnly=yes -p {1} {2}@{3} -W %h:%p' -f $resolvedKeyPath, $JumpPort, $JumpUser, $JumpHost
+        return @("-o", $proxyCommand)
+    }
+
+    return @("-J", ("{0}@{1}:{2}" -f $JumpUser, $JumpHost, $JumpPort))
 }
 
 $sshTarget = "$ServerUser@$ServerHost"
@@ -34,7 +52,7 @@ $sshArgs = @(
 )
 
 if ($JumpHost) {
-    $sshArgs += @("-J", ("{0}@{1}:{2}" -f $JumpUser, $JumpHost, $JumpPort))
+    $sshArgs += Get-JumpSshOptions
 }
 
 foreach ($forwarding in $forwardings) {

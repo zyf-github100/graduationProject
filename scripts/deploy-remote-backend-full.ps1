@@ -5,6 +5,7 @@ param(
     [string]$JumpHost = "",
     [int]$JumpPort = 22,
     [string]$JumpUser = "root",
+    [string]$JumpPrivateKeyFile = "",
     [string]$RemoteDir = "/opt/school-erp/stacks/erp-backend-full",
     [string]$ComposeProjectName = "school-erp-backend-full",
     [string]$CorsAllowedOrigin = "http://localhost:5173",
@@ -44,6 +45,10 @@ $args = @(
 
 if ($JumpHost) {
     $args += @("--jump-host", $JumpHost, "--jump-port", $JumpPort, "--jump-user", $JumpUser)
+}
+
+if ($JumpPrivateKeyFile) {
+    $args += @("--jump-private-key-file", $JumpPrivateKeyFile)
 }
 
 if ($MiddlewareEnvFile) {

@@ -40,7 +40,7 @@ Run on the local machine:
 If you must go through a bastion host, add jump parameters:
 
 ```powershell
-.\scripts\deploy-remote-gateway-legacy.ps1 -JumpHost <bastion-ip> -JumpUser <bastion-user> -JumpPort 22
+.\scripts\deploy-remote-gateway-legacy.ps1 -JumpHost <bastion-ip> -JumpUser <bastion-user> -JumpPort 22 -JumpPrivateKeyFile <local-key-path>
 ```
 
 This script builds only the `gateway-service` jar locally, uploads `app.jar`, `Dockerfile`, Compose, and `.env`, then builds the image on the server and restarts the isolated remote gateway container.
@@ -57,8 +57,10 @@ This script builds only the `gateway-service` jar locally, uploads `app.jar`, `D
 If you use a bastion host:
 
 ```powershell
-.\scripts\start-remote-gateway-tunnels.ps1 -JumpHost <bastion-ip> -JumpUser <bastion-user> -JumpPort 22
+.\scripts\start-remote-gateway-tunnels.ps1 -JumpHost <bastion-ip> -JumpUser <bastion-user> -JumpPort 22 -JumpPrivateKeyFile <local-key-path>
 ```
+
+If the bastion key is already your default local SSH key, for example `~/.ssh/id_rsa`, you can omit `-JumpPrivateKeyFile`.
 
 3. Create `frontend/.env.local` from `frontend/.env.remote-gateway.example` and point the frontend API base to the remote gateway:
 

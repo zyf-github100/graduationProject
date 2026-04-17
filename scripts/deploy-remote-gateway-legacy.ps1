@@ -5,6 +5,7 @@ param(
     [string]$JumpHost = "",
     [int]$JumpPort = 22,
     [string]$JumpUser = "root",
+    [string]$JumpPrivateKeyFile = "",
     [string]$RemoteDir = "/opt/school-erp/stacks/remote-gateway",
     [string]$ComposeProjectName = "school-erp-remote-gateway",
     [string]$CorsAllowedOrigin = "http://localhost:5173",
@@ -31,21 +32,32 @@ function Get-JumpTarget {
     return "{0}@{1}:{2}" -f $JumpUser, $JumpHost, $JumpPort
 }
 
+function Get-JumpOptions {
+    if (-not $JumpHost) {
+        return @()
+    }
+
+    if ($JumpPrivateKeyFile) {
+        if (-not (Test-Path $JumpPrivateKeyFile)) {
+            throw "Jump private key file not found: $JumpPrivateKeyFile"
+        }
+        $resolvedKeyPath = (Resolve-Path $JumpPrivateKeyFile).Path
+        $proxyCommand = 'ProxyCommand=ssh -i "{0}" -o IdentitiesOnly=yes -p {1} {2}@{3} -W %h:%p' -f $resolvedKeyPath, $JumpPort, $JumpUser, $JumpHost
+        return @("-o", $proxyCommand)
+    }
+
+    return @("-J", (Get-JumpTarget))
+}
+
 function Get-SshBaseArgs {
     $args = @("-p", $ServerPort)
-    $jumpTarget = Get-JumpTarget
-    if ($jumpTarget) {
-        $args += @("-J", $jumpTarget)
-    }
+    $args += Get-JumpOptions
     return $args
 }
 
 function Get-ScpBaseArgs {
     $args = @("-P", $ServerPort)
-    $jumpTarget = Get-JumpTarget
-    if ($jumpTarget) {
-        $args += @("-J", $jumpTarget)
-    }
+    $args += Get-JumpOptions
     return $args
 }
 
