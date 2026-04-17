@@ -134,6 +134,12 @@ const router = createRouter({
           meta: { title: '审批中心' },
         },
         {
+          path: 'notifications/inbox',
+          name: 'notification-inbox',
+          component: () => import('../pages/NotificationInboxPage.vue'),
+          meta: { title: '消息收件箱' },
+        },
+        {
           path: 'academic',
           name: 'academic',
           component: () => import('../pages/AcademicManagementPage.vue'),

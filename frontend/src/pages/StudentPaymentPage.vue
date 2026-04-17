@@ -2,12 +2,12 @@
   <div class="page student-payment-page">
     <PageHeader
       title="缴费中心"
-      description="学生端缴费页优先展示待缴账单、截止日期与支付状态，让支付动作直接、明确、可追踪。"
+      description="学生端优先聚焦待缴账单，让缴费、查看回单和确认到账状态都在一个页面完成。"
       :breadcrumbs="['学生服务', '缴费中心']"
     >
       <template #actions>
-        <el-button>下载缴费记录</el-button>
-        <el-button type="primary">立即缴费</el-button>
+        <el-button @click="handleDownload">下载缴费记录</el-button>
+        <el-button type="primary" @click="handleImmediatePay">立即缴费</el-button>
       </template>
     </PageHeader>
 
@@ -18,7 +18,7 @@
     <div class="page-grid two-columns">
       <PageSection
         title="我的账单"
-        description="统一展示费用项目、截止时间和支付状态，不拆成多个二级页面。"
+        description="直接查看每一笔账单的金额、状态和截止时间，待缴账单支持一键支付。"
       >
         <el-table :data="bills" border stripe>
           <el-table-column prop="billNo" label="账单编号" min-width="140" />
@@ -41,7 +41,13 @@
           </el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
-              <el-button text type="primary">{{ row.status === 'PAID' ? '查看回单' : '去缴费' }}</el-button>
+              <el-button
+                text
+                type="primary"
+                @click="row.status === 'PAID' ? openDetailDialog(row.id) : openPaymentDialog(row)"
+              >
+                {{ row.status === 'PAID' ? '查看回单' : '去缴费' }}
+              </el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -50,12 +56,12 @@
       <div class="section-stack">
         <PageSection
           title="待缴提醒"
-          description="把最紧急的一笔待缴账单单独提出，避免学生错过截止时间。"
+          description="把最紧急的一笔待缴账单单独突出，避免错过截止日期。"
         >
           <div class="payment-focus surface-muted">
             <div class="payment-focus__label">{{ pendingBill?.feeItemName ?? '暂无待缴账单' }}</div>
             <div class="payment-focus__value">
-              {{ pendingBill ? formatCurrency(pendingBill.receivableAmount - pendingBill.receivedAmount) : '¥0' }}
+              {{ pendingBill ? formatCurrency(outstandingAmount(pendingBill)) : '¥0' }}
             </div>
             <div class="payment-focus__meta">
               {{ pendingBill ? `请于 ${pendingBill.dueDate} 前完成支付` : '当前没有需要处理的账单' }}
@@ -65,22 +71,62 @@
 
         <PageSection
           title="缴费说明"
-          description="说明区保持业务型表达，帮助学生知道支付后会发生什么。"
+          description="说明区保持业务型表达，帮助学生了解支付成功后的状态变化。"
         >
           <ul class="payment-tips">
-            <li>线上支付成功后，账单状态将在 1 分钟内自动更新。</li>
-            <li>若已线下缴费，请保留回执，财务老师将在对账后同步登记。</li>
-            <li>需要申请缓缴时，请先联系辅导员或财务中心完成审批。</li>
+            <li>线上支付成功后，账单状态会立即更新为已缴清或部分已缴。</li>
+            <li>如需分次支付，系统会保留历史回单，直到整笔账单结清。</li>
+            <li>若需缓缴，请先联系辅导员或财务中心完成审批。</li>
           </ul>
         </PageSection>
       </div>
     </div>
+
+    <BillDetailDialog v-model="detailVisible" :bill-id="detailBillId" />
+
+    <el-dialog v-model="paymentVisible" title="支付账单" width="520px">
+      <el-form :model="paymentForm" label-position="top">
+        <el-alert
+          v-if="activeBill"
+          type="warning"
+          :closable="false"
+          class="payment-dialog__alert"
+          :title="`${activeBill.feeItemName}`"
+          :description="`待缴金额 ${formatCurrency(outstandingAmount(activeBill))}`"
+        />
+
+        <el-form-item label="支付金额">
+          <el-input-number v-model="paymentForm.receiptAmount" :min="1" :max="activeBill ? outstandingAmount(activeBill) : 1" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="支付渠道">
+          <el-select v-model="paymentForm.paymentChannel" style="width: 100%">
+            <el-option label="支付宝" value="ALIPAY" />
+            <el-option label="微信支付" value="WECHAT" />
+            <el-option label="银行卡" value="BANK_TRANSFER" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <div class="toolbar-inline">
+          <el-button @click="paymentVisible = false">取消</el-button>
+          <el-button type="primary" :loading="paymentSaving" @click="submitPayment">
+            确认支付
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { fetchStudentBillingOverview } from '../api/erp'
+import { ElMessage } from 'element-plus'
+import {
+  createReceipt,
+  fetchStudentBillingOverview,
+} from '../api/erp'
+import BillDetailDialog from '../components/billing/BillDetailDialog.vue'
 import MetricCard from '../components/common/MetricCard.vue'
 import PageHeader from '../components/common/PageHeader.vue'
 import PageSection from '../components/common/PageSection.vue'
@@ -92,13 +138,17 @@ const summary = ref<DashboardMetric[]>([])
 const bills = ref<BillRecord[]>([])
 const pendingBill = ref<BillRecord | null>(null)
 
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'CNY',
-    maximumFractionDigits: 0,
-  }).format(value)
-}
+const detailVisible = ref(false)
+const detailBillId = ref<number | null>(null)
+
+const paymentVisible = ref(false)
+const paymentSaving = ref(false)
+const activeBill = ref<BillRecord | null>(null)
+const paymentForm = ref({
+  paymentChannel: 'ALIPAY',
+  receiptAmount: 1,
+  sourceType: 'STUDENT_PORTAL',
+})
 
 const loadData = async () => {
   try {
@@ -111,7 +161,69 @@ const loadData = async () => {
   }
 }
 
-onMounted(loadData)
+const handleDownload = () => {
+  ElMessage.info('下载缴费记录待后续接入文件导出服务。')
+}
+
+const handleImmediatePay = () => {
+  if (!pendingBill.value) {
+    ElMessage.info('当前没有待缴账单。')
+    return
+  }
+  openPaymentDialog(pendingBill.value)
+}
+
+const openDetailDialog = (billId: number) => {
+  detailBillId.value = billId
+  detailVisible.value = true
+}
+
+const openPaymentDialog = (bill: BillRecord) => {
+  activeBill.value = bill
+  paymentForm.value = {
+    paymentChannel: 'ALIPAY',
+    receiptAmount: outstandingAmount(bill),
+    sourceType: 'STUDENT_PORTAL',
+  }
+  paymentVisible.value = true
+}
+
+const submitPayment = async () => {
+  if (!activeBill.value) {
+    return
+  }
+
+  paymentSaving.value = true
+  try {
+    await createReceipt({
+      billId: activeBill.value.id,
+      paymentChannel: paymentForm.value.paymentChannel,
+      receiptAmount: paymentForm.value.receiptAmount,
+      sourceType: paymentForm.value.sourceType,
+    })
+    ElMessage.success('支付成功，账单状态已更新')
+    paymentVisible.value = false
+    await loadData()
+    openDetailDialog(activeBill.value.id)
+  } catch (error) {
+    showRequestError(error, '支付失败。')
+  } finally {
+    paymentSaving.value = false
+  }
+}
+
+const outstandingAmount = (bill: BillRecord) => bill.receivableAmount - bill.receivedAmount
+
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat('zh-CN', {
+    currency: 'CNY',
+    maximumFractionDigits: 0,
+    style: 'currency',
+  }).format(value)
+
+onMounted(() => {
+  void loadData()
+})
 </script>
 
 <style scoped>
@@ -123,6 +235,10 @@ onMounted(loadData)
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--erp-space-6);
+}
+
+.payment-dialog__alert {
+  margin-bottom: 16px;
 }
 
 .payment-focus {

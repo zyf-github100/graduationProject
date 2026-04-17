@@ -29,7 +29,7 @@ public class DemoAuthService {
             List.of("广州软件学院管理员", "教务管理中心平台主管"),
             31001L,
             "教务管理中心",
-            List.of("dashboard:view", "master:student:read", "master:student:write", "workflow:task:approve", "billing:bill:export"),
+            List.of("dashboard:view", "master:student:read", "master:student:write", "workflow:task:approve", "billing:bill:export", "notify:inbox:view"),
             List.of("CAMPUS:主校区", "GRADE:2025级", "GRADE:2024级", "GRADE:2023级"),
             List.of("student:export", "billing:export"),
             List.of("ADMIN_WEB")
@@ -233,7 +233,8 @@ public class DemoAuthService {
                 new MenuItemDto(5L, "收费管理", "/billing", "Layout", "Money", List.of(
                         new MenuItemDto(51L, "账单管理", "/billing/bills", "BillingPage", null, List.of())
                 )),
-                new MenuItemDto(6L, "个人中心", "/settings/profile", "ProfilePage", "Setting", List.of())
+                new MenuItemDto(6L, "消息收件箱", "/notifications/inbox", "NotificationInboxPage", "Bell", List.of()),
+                new MenuItemDto(7L, "个人中心", "/settings/profile", "ProfilePage", "Setting", List.of())
         );
     }
 

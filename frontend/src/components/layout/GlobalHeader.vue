@@ -23,8 +23,8 @@
         <el-option label="2025-2026 学年第二学期" value="2025-2026 学年第二学期" />
         <el-option label="2025-2026 学年第一学期" value="2025-2026 学年第一学期" />
       </el-select>
-      <el-badge :value="store.unreadCount">
-        <el-button text>
+      <el-badge :value="store.unreadCount" :hidden="store.unreadCount === 0">
+        <el-button text @click="goToNotifications">
           <el-icon><Bell /></el-icon>
         </el-button>
       </el-badge>
@@ -43,6 +43,7 @@
 <script setup lang="ts">
 import { Bell, Fold, Search } from '@element-plus/icons-vue'
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAppStore } from '../../stores/app'
 
 interface Props {
@@ -53,7 +54,7 @@ interface Props {
   searchPlaceholder?: string
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   searchPlaceholder: '搜索课程 / 通知 / 账单',
 })
 
@@ -63,6 +64,7 @@ defineEmits<{
 }>()
 
 const store = useAppStore()
+const router = useRouter()
 
 const campusModel = computed({
   get: () => store.campus,
@@ -74,7 +76,24 @@ const termModel = computed({
   set: (value: string) => store.setTerm(value),
 })
 
-const userInitial = computed(() => props.currentUser.displayName.slice(0, 1) || '我')
+const userInitial = computed(() => store.currentUser?.displayName.slice(0, 1) || 'A')
+
+const goToNotifications = () => {
+  const destination = (() => {
+    switch (store.currentUser?.userType) {
+      case 'STUDENT':
+        return '/student/notices'
+      case 'TEACHER':
+        return '/teacher/notices'
+      default:
+        return '/notifications/inbox'
+    }
+  })()
+
+  if (router.currentRoute.value.path !== destination) {
+    void router.push(destination)
+  }
+}
 </script>
 
 <style scoped>

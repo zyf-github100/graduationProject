@@ -56,6 +56,75 @@ export interface StudentBillingOverview {
   summary: DashboardMetric[]
 }
 
+export interface BillDetailData extends BillRecord {
+  billDetails: Array<{
+    amount: number
+    itemName: string
+    remark: string
+  }>
+  createdAt: string
+  feeItemInfo: {
+    dueDate: string
+    feeItemName: string
+    receivableAmount: number
+  }
+  outstandingAmount: number
+  receipts: Array<{
+    billId: number
+    paymentChannel: string
+    paymentTime: string
+    receiptAmount: number
+    receiptId: number
+    receiptNo: string
+    sourceType: string
+  }>
+  statusTimeline: Array<{
+    content: string
+    time: string
+    type: 'primary' | 'success' | 'warning' | 'danger' | 'info'
+  }>
+  studentInfo: {
+    className: string
+    studentName: string
+    studentNo: string
+  }
+  studentNo: string
+  updatedAt: string
+}
+
+export interface GenerateBillPayload {
+  className: string
+  dueDate: string
+  feeItemName: string
+  receivableAmount: number
+  studentName: string
+  studentNo: string
+}
+
+export interface GenerateBillResult {
+  billId: number
+  billNo: string
+  taskId: number
+  taskStatus: string
+}
+
+export interface ReceiptCreatePayload {
+  billId: number
+  paymentChannel: string
+  paymentTime?: string
+  receiptAmount: number
+  sourceType: string
+}
+
+export interface ReceiptCreateResult {
+  billId: number
+  billStatus: string
+  outstandingAmount: number
+  receiptId: number
+  receiptNo: string
+  receivedAmount: number
+}
+
 export interface NoticeCategorySummary {
   category: string
   label: string
@@ -72,6 +141,75 @@ export interface TeacherNoticeCenterData {
   categorySummary: NoticeCategorySummary[]
   records: StudentNotice[]
   unreadCount: number
+}
+
+export interface WorkflowInboxItem {
+  bizId: string
+  bizType: string
+  eventType: string
+  id: string
+  isRead: boolean
+  occurredAt: string
+  priority: 'high' | 'normal'
+  routingKey: string
+  sourceService: string
+  summary: string
+  title: string
+  workflowStatus: string
+}
+
+export interface NotifyMessageRecipientPayload {
+  billId: number
+  billNo: string
+  className: string
+  dueDate: string
+  feeItemName: string
+  outstandingAmount: number
+  studentName: string
+  studentNo: string
+}
+
+export interface SendNotifyMessagePayload {
+  bizId?: string
+  bizType?: string
+  channel: string
+  recipients: NotifyMessageRecipientPayload[]
+  summary: string
+  templateCode: string
+  title: string
+}
+
+export interface NotifyMessageTask {
+  bizId: string
+  bizType: string
+  channel: string
+  createdAt: string
+  failedCount: number
+  recipientCount: number
+  status: string
+  successCount: number
+  summary: string
+  taskId: string
+  taskNo: string
+  templateCode: string
+  title: string
+  updatedAt: string
+}
+
+export interface NotifyMessageRecipient {
+  billId: number
+  billNo: string
+  channel: string
+  className: string
+  dueDate: string
+  feeItemName: string
+  outstandingAmount: number
+  recipientId: string
+  recipientName: string
+  sentAt: string
+  status: string
+  studentNo: string
+  taskId: string
 }
 
 export interface StudentProfileData {
@@ -349,6 +487,26 @@ export const fetchTeacherGrades = () =>
 export const fetchTeacherNotices = () =>
   request<TeacherNoticeCenterData>('/api/v1/notify/teacher/notices')
 
+export const fetchWorkflowInbox = () =>
+  request<WorkflowInboxItem[]>('/api/v1/notify/tasks/inbox')
+
+export const markWorkflowInboxRead = (messageId: string) =>
+  request<WorkflowInboxItem>(`/api/v1/notify/tasks/inbox/${messageId}/read`, {
+    method: 'POST',
+  })
+
+export const sendNotifyMessage = (payload: SendNotifyMessagePayload) =>
+  request<NotifyMessageTask>('/api/v1/notify/messages/send', {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+
+export const fetchNotifyMessageTask = (taskId: string) =>
+  request<NotifyMessageTask>(`/api/v1/notify/messages/${taskId}`)
+
+export const fetchNotifyMessageRecipients = (taskId: string) =>
+  request<NotifyMessageRecipient[]>(`/api/v1/notify/messages/${taskId}/recipients`)
+
 export const fetchTeacherProfile = (teacherNo?: string) =>
   request<TeacherProfileData>('/api/v1/master/teacher/profile', {
     query: { teacherNo },
@@ -392,6 +550,9 @@ export const fetchAcademicOverview = () =>
 export const fetchBillingSummary = () =>
   request<DashboardMetric[]>('/api/v1/billing/bills/summary')
 
+export const fetchBillDetail = (billId: number) =>
+  request<BillDetailData>(`/api/v1/billing/bills/${billId}`)
+
 export const fetchBills = (query: {
   keyword?: string
   pageNo?: number
@@ -400,6 +561,18 @@ export const fetchBills = (query: {
 }) =>
   request<PageResult<BillRecord>>('/api/v1/billing/bills', {
     query,
+  })
+
+export const generateBill = (payload: GenerateBillPayload) =>
+  request<GenerateBillResult>('/api/v1/billing/bills/generate', {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+
+export const createReceipt = (payload: ReceiptCreatePayload) =>
+  request<ReceiptCreateResult>('/api/v1/billing/receipts', {
+    body: JSON.stringify(payload),
+    method: 'POST',
   })
 
 export const fetchWorkflowTasks = (query: WorkflowTaskQuery) =>

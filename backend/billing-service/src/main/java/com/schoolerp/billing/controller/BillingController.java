@@ -1,12 +1,17 @@
 package com.schoolerp.billing.controller;
 
+import com.schoolerp.billing.dto.BillGenerateRequest;
+import com.schoolerp.billing.dto.ReceiptCreateRequest;
 import com.schoolerp.billing.service.BillingService;
 import com.schoolerp.common.api.ApiResponse;
 import com.schoolerp.common.api.PageResult;
 import com.schoolerp.common.web.RequestIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -42,12 +47,26 @@ public class BillingController {
         List<Map<String, Object>> allBills = billingService.list(keyword, status);
         int fromIndex = (int) Math.min((pageNo - 1) * pageSize, allBills.size());
         int toIndex = (int) Math.min(fromIndex + pageSize, allBills.size());
-        return ApiResponse.success(PageResult.of(allBills.subList(fromIndex, toIndex), pageNo, pageSize, allBills.size()), "查询成功", requestId(request));
+        return ApiResponse.success(
+                PageResult.of(allBills.subList(fromIndex, toIndex), pageNo, pageSize, allBills.size()),
+                "查询成功",
+                requestId(request)
+        );
     }
 
     @GetMapping("/bills/{billId}")
     public ApiResponse<?> detail(@PathVariable Long billId, HttpServletRequest request) {
         return ApiResponse.success(billingService.detail(billId), "查询成功", requestId(request));
+    }
+
+    @PostMapping("/bills/generate")
+    public ApiResponse<?> generate(@Valid @RequestBody BillGenerateRequest body, HttpServletRequest request) {
+        return ApiResponse.success(billingService.generate(body), "账单生成任务已提交", requestId(request));
+    }
+
+    @PostMapping("/receipts")
+    public ApiResponse<?> createReceipt(@Valid @RequestBody ReceiptCreateRequest body, HttpServletRequest request) {
+        return ApiResponse.success(billingService.createReceipt(body), "收款登记成功", requestId(request));
     }
 
     private String requestId(HttpServletRequest request) {

@@ -4,7 +4,7 @@ import {
   fetchPermissionProfile,
   fetchStudentNotices,
   fetchTeacherNotices,
-  fetchWorkflowTodo,
+  fetchWorkflowInbox,
   login as loginRequest,
   logout as logoutRequest,
   me,
@@ -103,23 +103,23 @@ export const useAppStore = defineStore('app', () => {
     return initializePromise
   }
 
-  const refreshPortalIndicators = async (path: string) => {
+  const refreshPortalIndicators = async (_path: string) => {
     if (!hasSession.value) {
       unreadCount.value = 0
       return
     }
 
-    if (path.startsWith('/student')) {
+    if (currentUser.value?.userType === 'STUDENT') {
       unreadCount.value = (await fetchStudentNotices()).unreadCount
       return
     }
 
-    if (path.startsWith('/teacher')) {
+    if (currentUser.value?.userType === 'TEACHER') {
       unreadCount.value = (await fetchTeacherNotices()).unreadCount
       return
     }
 
-    unreadCount.value = (await fetchWorkflowTodo({ pageNo: 1, pageSize: 1 })).total
+    unreadCount.value = (await fetchWorkflowInbox()).filter((item) => !item.isRead).length
   }
 
   const login = async (payload: {

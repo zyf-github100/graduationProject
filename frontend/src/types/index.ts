@@ -105,6 +105,7 @@ export interface BillRecord {
   receivedAmount: number
   status: string
   studentName: string
+  studentNo: string
 }
 
 export interface StudentCourseSlot {
