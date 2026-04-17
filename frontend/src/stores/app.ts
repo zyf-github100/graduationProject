@@ -43,11 +43,15 @@ export const useAppStore = defineStore('app', () => {
   const currentUser = ref<CurrentUser | null>(null)
   const menus = ref<MenuItem[]>([])
   const permissions = ref<PermissionResponse | null>(null)
+  const hasSession = ref(Boolean(getStoredAccessToken()))
 
   let initializePromise: Promise<void> | null = null
 
-  const hasSession = computed(() => Boolean(getStoredAccessToken()))
   const homePath = computed(() => resolveHomePath(currentUser.value?.userType))
+
+  const syncSessionState = () => {
+    hasSession.value = Boolean(getStoredAccessToken())
+  }
 
   const toggleSidebar = () => {
     collapsed.value = !collapsed.value
@@ -83,6 +87,8 @@ export const useAppStore = defineStore('app', () => {
   }
 
   const initializeSession = async (force = false) => {
+    syncSessionState()
+
     if (!hasSession.value) {
       resetSessionState()
       return
@@ -135,6 +141,7 @@ export const useAppStore = defineStore('app', () => {
     })
 
     storeAuthSession(session, payload.remember)
+    syncSessionState()
     await initializeSession(true)
     return currentUser.value
   }
@@ -146,12 +153,14 @@ export const useAppStore = defineStore('app', () => {
       }
     } finally {
       clearStoredSession()
+      syncSessionState()
       resetSessionState()
     }
   }
 
   const clearSession = () => {
     clearStoredSession()
+    syncSessionState()
     resetSessionState()
   }
 
