@@ -8,7 +8,8 @@ param(
     [string]$JumpPrivateKeyFile = "",
     [string]$RemoteDir = "/opt/school-erp/stacks/erp-backend-full",
     [string]$ComposeProjectName = "school-erp-backend-full",
-    [string]$CorsAllowedOrigin = "http://localhost:5173",
+    [Alias("CorsAllowedOrigin")]
+    [string]$CorsAllowedOrigins = "http://localhost:5173,http://8.148.181.9:90",
     [string]$GatewayBindIp = "0.0.0.0",
     [int]$GatewayPort = 18080,
     [string]$NacosUsername = "nacos",
@@ -36,7 +37,7 @@ $args = @(
     "--target-user", $ServerUser,
     "--remote-dir", $RemoteDir,
     "--compose-project-name", $ComposeProjectName,
-    "--cors-allowed-origin", $CorsAllowedOrigin,
+    "--cors-allowed-origins", $CorsAllowedOrigins,
     "--gateway-bind-ip", $GatewayBindIp,
     "--gateway-port", $GatewayPort,
     "--nacos-username", $NacosUsername,

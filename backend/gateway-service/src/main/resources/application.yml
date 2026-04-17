@@ -33,23 +33,6 @@ spring:
           uri: ${NOTIFY_SERVICE_URI:lb://notify-service}
           predicates:
             - Path=/api/v1/notify/**
-      globalcors:
-        corsConfigurations:
-          '[/**]':
-            allowedOrigins:
-              - ${CORS_ALLOWED_ORIGIN:http://localhost:5173}
-            allowedMethods:
-              - GET
-              - POST
-              - PUT
-              - PATCH
-              - DELETE
-              - OPTIONS
-            allowedHeaders:
-              - '*'
-            exposedHeaders:
-              - X-Request-Id
-            allowCredentials: true
 
 management:
   endpoints:

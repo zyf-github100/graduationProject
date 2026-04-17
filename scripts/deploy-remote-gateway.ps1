@@ -8,7 +8,8 @@ param(
     [string]$JumpPrivateKeyFile = "",
     [string]$RemoteDir = "/opt/school-erp/stacks/erp-backend-full",
     [string]$ComposeProjectName = "school-erp-backend-full",
-    [string]$CorsAllowedOrigin = "http://localhost:5173",
+    [Alias("CorsAllowedOrigin")]
+    [string]$CorsAllowedOrigins = "http://localhost:5173,http://8.148.181.9:90",
     [string]$GatewayBindIp = "0.0.0.0",
     [int]$GatewayPort = 18080,
     [string]$NacosUsername = "nacos",
@@ -108,7 +109,7 @@ function New-GeneratedBackendEnv([hashtable]$MiddlewareValues, [string]$OutputPa
     @(
         "GATEWAY_BIND_IP=$GatewayBindIp"
         "GATEWAY_EXPOSE_PORT=$GatewayPort"
-        "CORS_ALLOWED_ORIGIN=$CorsAllowedOrigin"
+        "CORS_ALLOWED_ORIGINS=$CorsAllowedOrigins"
         "NACOS_SERVER_ADDR=nacos:8848"
         "NACOS_USERNAME=$NacosUsername"
         "NACOS_PASSWORD=$NacosPassword"

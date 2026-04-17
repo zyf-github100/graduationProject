@@ -24,6 +24,7 @@ SERVICES = [
     "billing-service",
     "notify-service",
 ]
+DEFAULT_CORS_ALLOWED_ORIGINS = "http://localhost:5173,http://8.148.181.9:90"
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -48,7 +49,7 @@ def build_backend_env(args: argparse.Namespace, middleware_env: dict[str, str]) 
     return {
         "GATEWAY_BIND_IP": args.gateway_bind_ip,
         "GATEWAY_EXPOSE_PORT": str(args.gateway_port),
-        "CORS_ALLOWED_ORIGIN": args.cors_allowed_origin,
+        "CORS_ALLOWED_ORIGINS": args.cors_allowed_origins,
         "NACOS_SERVER_ADDR": "nacos:8848",
         "NACOS_USERNAME": args.nacos_username,
         "NACOS_PASSWORD": args.nacos_password,
@@ -156,7 +157,12 @@ def main() -> None:
     parser.add_argument("--compose-project-name", default="school-erp-backend-full")
     parser.add_argument("--middleware-env-file", type=Path, default=DEFAULT_MIDDLEWARE_ENV_PATH)
     parser.add_argument("--backend-env-file", type=Path, default=DEFAULT_BACKEND_ENV_PATH)
-    parser.add_argument("--cors-allowed-origin", default="http://localhost:5173")
+    parser.add_argument(
+        "--cors-allowed-origins",
+        "--cors-allowed-origin",
+        dest="cors_allowed_origins",
+        default=DEFAULT_CORS_ALLOWED_ORIGINS,
+    )
     parser.add_argument("--gateway-bind-ip", default="0.0.0.0")
     parser.add_argument("--gateway-port", type=int, default=18080)
     parser.add_argument("--nacos-username", default="nacos")

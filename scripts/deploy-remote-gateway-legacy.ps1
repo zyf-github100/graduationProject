@@ -8,7 +8,8 @@ param(
     [string]$JumpPrivateKeyFile = "",
     [string]$RemoteDir = "/opt/school-erp/stacks/remote-gateway",
     [string]$ComposeProjectName = "school-erp-remote-gateway",
-    [string]$CorsAllowedOrigin = "http://localhost:5173",
+    [Alias("CorsAllowedOrigin")]
+    [string]$CorsAllowedOrigins = "http://localhost:5173,http://8.148.181.9:90",
     [string]$GatewayBindIp = "0.0.0.0",
     [int]$GatewayPort = 18080
 )
@@ -76,7 +77,7 @@ $envFile = Join-Path ([System.IO.Path]::GetTempPath()) "school-erp-gateway.remot
     "SERVER_PORT=8080"
     "GATEWAY_BIND_IP=$GatewayBindIp"
     "GATEWAY_EXPOSE_PORT=$GatewayPort"
-    "CORS_ALLOWED_ORIGIN=$CorsAllowedOrigin"
+    "CORS_ALLOWED_ORIGINS=$CorsAllowedOrigins"
     "AUTH_SERVICE_URI=http://host.docker.internal:18081"
     "MASTER_SERVICE_URI=http://host.docker.internal:18082"
     "ACADEMIC_SERVICE_URI=http://host.docker.internal:18083"
