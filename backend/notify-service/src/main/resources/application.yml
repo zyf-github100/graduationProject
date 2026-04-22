@@ -6,6 +6,11 @@ spring:
     default: standalone
   application:
     name: notify-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:18111}/${POSTGRES_DB:school_erp}}
+    username: ${SPRING_DATASOURCE_USERNAME:${POSTGRES_USER:school_erp}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${POSTGRES_PASSWORD:school_erp}}
+    driver-class-name: org.postgresql.Driver
   rabbitmq:
     host: ${RABBITMQ_HOST:127.0.0.1}
     port: ${RABBITMQ_PORT:18113}

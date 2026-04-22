@@ -7,41 +7,107 @@ import com.schoolerp.master.dto.StudentDetail;
 import com.schoolerp.master.dto.StudentLog;
 import com.schoolerp.master.dto.StudentRecord;
 import com.schoolerp.master.dto.StudentSaveRequest;
+import jakarta.annotation.PostConstruct;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 public class StudentService {
     private static final DateTimeFormatter LOG_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
-    private final Map<Long, StudentDetail> studentStore = new ConcurrentHashMap<>();
-    private final AtomicLong idGenerator = new AtomicLong(1005L);
+    private final JdbcTemplate jdbcTemplate;
 
-    public StudentService() {
-        seedStudents().forEach(student -> studentStore.put(student.id(), student));
+    public StudentService(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    @PostConstruct
+    public void initializeStorage() {
+        jdbcTemplate.execute("""
+                create table if not exists erp_students (
+                    id bigint primary key,
+                    student_no varchar(64) not null unique,
+                    student_name varchar(128) not null,
+                    gender varchar(16) not null,
+                    grade_name varchar(64) not null,
+                    class_name varchar(128) not null,
+                    status varchar(32) not null,
+                    admission_date varchar(32) not null,
+                    guardian_name varchar(128) not null,
+                    guardian_phone varchar(64) not null,
+                    id_card_masked varchar(64) not null,
+                    campus varchar(64) not null,
+                    class_teacher varchar(128) not null,
+                    dormitory varchar(128) not null,
+                    address varchar(256) not null,
+                    remark varchar(1024) not null
+                )
+                """);
+        jdbcTemplate.execute("""
+                create table if not exists erp_student_contacts (
+                    id bigserial primary key,
+                    student_id bigint not null references erp_students(id) on delete cascade,
+                    label varchar(64) not null,
+                    name varchar(128) not null,
+                    relation varchar(64) not null,
+                    phone varchar(64) not null,
+                    sort_order integer not null default 0
+                )
+                """);
+        jdbcTemplate.execute("""
+                create table if not exists erp_student_logs (
+                    id bigserial primary key,
+                    student_id bigint not null references erp_students(id) on delete cascade,
+                    log_time varchar(32) not null,
+                    content varchar(512) not null,
+                    actor varchar(128) not null,
+                    sort_order integer not null default 0
+                )
+                """);
+
+        Integer count = jdbcTemplate.queryForObject("select count(*) from erp_students", Integer.class);
+        if (count != null && count == 0) {
+            seedStudents().forEach(this::insertDetail);
+        }
     }
 
     public Map<String, Integer> summary() {
+        Integer total = jdbcTemplate.queryForObject("select count(*) from erp_students", Integer.class);
+        Integer onLeave = jdbcTemplate.queryForObject("select count(*) from erp_students where status = 'LEAVE'", Integer.class);
+        Integer incompleteGuardianProfiles = jdbcTemplate.queryForObject("""
+                select count(*) from erp_students
+                where guardian_name = '' or guardian_phone = ''
+                """, Integer.class);
+        Integer weeklyNewRecords = jdbcTemplate.queryForObject("""
+                select count(distinct student_id) from erp_student_logs
+                where content like '%新建学生档案%'
+                """, Integer.class);
+
         return Map.of(
-                "currentStudents", 1284,
-                "onLeaveStudents", 18,
-                "incompleteGuardianProfiles", 26,
-                "weeklyNewRecords", 34
+                "currentStudents", total == null ? 0 : total,
+                "onLeaveStudents", onLeave == null ? 0 : onLeave,
+                "incompleteGuardianProfiles", incompleteGuardianProfiles == null ? 0 : incompleteGuardianProfiles,
+                "weeklyNewRecords", weeklyNewRecords == null ? 0 : weeklyNewRecords
         );
     }
 
     public Map<String, Object> options() {
+        List<String> campuses = nonEmptyOptions("select distinct campus from erp_students order by campus", List.of("主校区", "实训校区"));
+        List<String> grades = nonEmptyOptions("select distinct grade_name from erp_students order by grade_name desc", List.of("2025级", "2024级", "2023级"));
+
         return Map.of(
-                "campuses", List.of("主校区", "实训校区"),
-                "grades", List.of("2025级", "2024级", "2023级"),
+                "campuses", campuses,
+                "grades", grades,
                 "statuses", List.of(
                         Map.of("label", "在读", "value", "ACTIVE"),
                         Map.of("label", "请假中", "value", "LEAVE"),
@@ -52,7 +118,7 @@ public class StudentService {
     }
 
     public List<StudentRecord> list(String keyword, String grade, String status) {
-        return studentStore.values().stream()
+        return allStudentDetails().stream()
                 .sorted(Comparator.comparing(StudentDetail::id))
                 .filter(student -> keyword == null || keyword.isBlank() || matchKeyword(student, keyword))
                 .filter(student -> grade == null || grade.isBlank() || grade.equals(student.gradeName()))
@@ -62,11 +128,15 @@ public class StudentService {
     }
 
     public StudentDetail detail(Long studentId) {
-        StudentDetail studentDetail = studentStore.get(studentId);
-        if (studentDetail == null) {
+        List<StudentDetail> details = jdbcTemplate.query(
+                "select * from erp_students where id = ?",
+                (rs, rowNum) -> toDetail(rs),
+                studentId
+        );
+        if (details.isEmpty()) {
             throw new BusinessException(ResultCode.NOT_FOUND, 404, "学生档案不存在");
         }
-        return studentDetail;
+        return details.get(0);
     }
 
     public Map<String, Object> studentProfile(String studentNo) {
@@ -103,21 +173,200 @@ public class StudentService {
         ));
     }
 
+    @Transactional
     public StudentDetail create(StudentSaveRequest request) {
-        long studentId = idGenerator.incrementAndGet();
+        long studentId = nextStudentId();
         StudentDetail studentDetail = buildDetail(studentId, request, List.of(log("新建学生档案", "基础数据服务")));
-        studentStore.put(studentId, studentDetail);
+        insertDetail(studentDetail);
         return studentDetail;
     }
 
+    @Transactional
     public StudentDetail update(Long studentId, StudentSaveRequest request) {
         StudentDetail current = detail(studentId);
         List<StudentLog> logs = new java.util.ArrayList<>();
         logs.add(log("更新学生档案", "基础数据服务"));
         logs.addAll(current.logs());
         StudentDetail updated = buildDetail(studentId, request, logs);
-        studentStore.put(studentId, updated);
+        updateDetail(updated);
         return updated;
+    }
+
+    private List<String> nonEmptyOptions(String sql, List<String> fallback) {
+        List<String> values = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString(1));
+        return values.isEmpty() ? fallback : values;
+    }
+
+    private List<StudentDetail> allStudentDetails() {
+        return jdbcTemplate.query("select * from erp_students", (rs, rowNum) -> toDetail(rs));
+    }
+
+    private StudentDetail toDetail(ResultSet rs) throws SQLException {
+        long studentId = rs.getLong("id");
+        return new StudentDetail(
+                studentId,
+                rs.getString("student_no"),
+                rs.getString("student_name"),
+                rs.getString("gender"),
+                rs.getString("grade_name"),
+                rs.getString("class_name"),
+                rs.getString("status"),
+                rs.getString("admission_date"),
+                rs.getString("guardian_name"),
+                rs.getString("guardian_phone"),
+                rs.getString("id_card_masked"),
+                rs.getString("campus"),
+                rs.getString("class_teacher"),
+                rs.getString("dormitory"),
+                rs.getString("address"),
+                rs.getString("remark"),
+                contacts(studentId),
+                logs(studentId)
+        );
+    }
+
+    private List<StudentContact> contacts(Long studentId) {
+        return jdbcTemplate.query("""
+                        select label, name, relation, phone
+                        from erp_student_contacts
+                        where student_id = ?
+                        order by sort_order, id
+                        """,
+                (rs, rowNum) -> new StudentContact(
+                        rs.getString("label"),
+                        rs.getString("name"),
+                        rs.getString("relation"),
+                        rs.getString("phone")
+                ),
+                studentId
+        );
+    }
+
+    private List<StudentLog> logs(Long studentId) {
+        return jdbcTemplate.query("""
+                        select log_time, content, actor
+                        from erp_student_logs
+                        where student_id = ?
+                        order by sort_order, id
+                        """,
+                (rs, rowNum) -> new StudentLog(
+                        rs.getString("log_time"),
+                        rs.getString("content"),
+                        rs.getString("actor")
+                ),
+                studentId
+        );
+    }
+
+    private void insertDetail(StudentDetail detail) {
+        jdbcTemplate.update("""
+                        insert into erp_students (
+                            id, student_no, student_name, gender, grade_name, class_name, status,
+                            admission_date, guardian_name, guardian_phone, id_card_masked, campus,
+                            class_teacher, dormitory, address, remark
+                        )
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                detail.id(),
+                detail.studentNo(),
+                detail.studentName(),
+                detail.gender(),
+                detail.gradeName(),
+                detail.className(),
+                detail.status(),
+                detail.admissionDate(),
+                detail.guardianName(),
+                detail.guardianPhone(),
+                detail.idCardMasked(),
+                detail.campus(),
+                detail.classTeacher(),
+                detail.dormitory(),
+                detail.address(),
+                detail.remark()
+        );
+        replaceContacts(detail.id(), detail.contacts());
+        replaceLogs(detail.id(), detail.logs());
+    }
+
+    private void updateDetail(StudentDetail detail) {
+        jdbcTemplate.update("""
+                        update erp_students
+                        set student_no = ?,
+                            student_name = ?,
+                            gender = ?,
+                            grade_name = ?,
+                            class_name = ?,
+                            status = ?,
+                            admission_date = ?,
+                            guardian_name = ?,
+                            guardian_phone = ?,
+                            id_card_masked = ?,
+                            campus = ?,
+                            class_teacher = ?,
+                            dormitory = ?,
+                            address = ?,
+                            remark = ?
+                        where id = ?
+                        """,
+                detail.studentNo(),
+                detail.studentName(),
+                detail.gender(),
+                detail.gradeName(),
+                detail.className(),
+                detail.status(),
+                detail.admissionDate(),
+                detail.guardianName(),
+                detail.guardianPhone(),
+                detail.idCardMasked(),
+                detail.campus(),
+                detail.classTeacher(),
+                detail.dormitory(),
+                detail.address(),
+                detail.remark(),
+                detail.id()
+        );
+        replaceContacts(detail.id(), detail.contacts());
+        replaceLogs(detail.id(), detail.logs());
+    }
+
+    private void replaceContacts(Long studentId, List<StudentContact> contacts) {
+        jdbcTemplate.update("delete from erp_student_contacts where student_id = ?", studentId);
+        for (int index = 0; index < contacts.size(); index++) {
+            StudentContact contact = contacts.get(index);
+            jdbcTemplate.update("""
+                            insert into erp_student_contacts (student_id, label, name, relation, phone, sort_order)
+                            values (?, ?, ?, ?, ?, ?)
+                            """,
+                    studentId,
+                    contact.label(),
+                    contact.name(),
+                    contact.relation(),
+                    contact.phone(),
+                    index
+            );
+        }
+    }
+
+    private void replaceLogs(Long studentId, List<StudentLog> logs) {
+        jdbcTemplate.update("delete from erp_student_logs where student_id = ?", studentId);
+        for (int index = 0; index < logs.size(); index++) {
+            StudentLog log = logs.get(index);
+            jdbcTemplate.update("""
+                            insert into erp_student_logs (student_id, log_time, content, actor, sort_order)
+                            values (?, ?, ?, ?, ?)
+                            """,
+                    studentId,
+                    log.time(),
+                    log.content(),
+                    log.actor(),
+                    index
+            );
+        }
+    }
+
+    private long nextStudentId() {
+        Number value = jdbcTemplate.queryForObject("select coalesce(max(id), 1000) + 1 from erp_students", Number.class);
+        return value == null ? 1001L : value.longValue();
     }
 
     private StudentDetail buildDetail(Long studentId, StudentSaveRequest request, List<StudentLog> logs) {
@@ -168,10 +417,15 @@ public class StudentService {
     }
 
     private StudentDetail detailByStudentNo(String studentNo) {
-        return studentStore.values().stream()
-                .filter(student -> student.studentNo().equals(studentNo))
-                .findFirst()
-                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, 404, "学生档案不存在"));
+        List<StudentDetail> details = jdbcTemplate.query(
+                "select * from erp_students where student_no = ?",
+                (rs, rowNum) -> toDetail(rs),
+                studentNo
+        );
+        if (details.isEmpty()) {
+            throw new BusinessException(ResultCode.NOT_FOUND, 404, "学生档案不存在");
+        }
+        return details.get(0);
     }
 
     private boolean matchKeyword(StudentDetail detail, String keyword) {

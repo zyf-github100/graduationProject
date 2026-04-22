@@ -9,14 +9,17 @@ import com.schoolerp.auth.security.JwtService;
 import com.schoolerp.common.api.BusinessException;
 import com.schoolerp.common.api.ResultCode;
 import com.schoolerp.common.security.CurrentUser;
+import jakarta.annotation.PostConstruct;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class DemoAuthService {
@@ -80,14 +83,29 @@ public class DemoAuthService {
     );
 
     private final JwtService jwtService;
+    private final JdbcTemplate jdbcTemplate;
     private final long refreshTokenTtlSeconds;
-    private final Map<String, SessionState> accessSessions = new ConcurrentHashMap<>();
-    private final Map<String, String> refreshIndex = new ConcurrentHashMap<>();
 
     public DemoAuthService(JwtService jwtService,
+                           JdbcTemplate jdbcTemplate,
                            @Value("${school-erp.security.refresh-token-ttl-seconds}") long refreshTokenTtlSeconds) {
         this.jwtService = jwtService;
+        this.jdbcTemplate = jdbcTemplate;
         this.refreshTokenTtlSeconds = refreshTokenTtlSeconds;
+    }
+
+    @PostConstruct
+    public void initializeStorage() {
+        jdbcTemplate.execute("""
+                create table if not exists erp_auth_sessions (
+                    access_token text primary key,
+                    refresh_token varchar(128) not null unique,
+                    username varchar(128) not null,
+                    expired_at timestamptz not null,
+                    created_at timestamptz not null
+                )
+                """);
+        cleanupExpiredSessions();
     }
 
     public LoginResponse login(LoginRequest request) {
@@ -105,32 +123,35 @@ public class DemoAuthService {
     }
 
     public void logout(String accessToken) {
-        SessionState sessionState = accessSessions.remove(accessToken);
-        if (sessionState != null) {
-            refreshIndex.remove(sessionState.refreshToken());
-        }
+        jdbcTemplate.update("delete from erp_auth_sessions where access_token = ?", accessToken);
     }
 
+    @Transactional
     public LoginResponse refresh(String refreshToken) {
-        String accessToken = refreshIndex.get(refreshToken);
-        if (accessToken == null) {
+        SessionState sessionState = sessionByRefreshToken(refreshToken);
+        if (sessionState == null) {
             throw new BusinessException(ResultCode.UNAUTHORIZED, 401, "刷新令牌无效或已失效");
         }
 
-        SessionState sessionState = accessSessions.get(accessToken);
         if (sessionState == null || sessionState.expiredAt().isBefore(Instant.now())) {
-            accessSessions.remove(accessToken);
-            refreshIndex.remove(refreshToken);
+            jdbcTemplate.update("delete from erp_auth_sessions where refresh_token = ?", refreshToken);
             throw new BusinessException(ResultCode.UNAUTHORIZED, 401, "刷新令牌已过期，请重新登录");
         }
 
-        logout(accessToken);
-        return createSession(sessionState.authUser());
+        logout(sessionState.accessToken());
+        return createSession(requireUser(sessionState.username()));
     }
 
     public boolean isAccessTokenActive(String accessToken) {
-        SessionState sessionState = accessSessions.get(accessToken);
-        return sessionState != null && sessionState.expiredAt().isAfter(Instant.now());
+        SessionState sessionState = sessionByAccessToken(accessToken);
+        if (sessionState == null) {
+            return false;
+        }
+        if (sessionState.expiredAt().isAfter(Instant.now())) {
+            return true;
+        }
+        logout(accessToken);
+        return false;
     }
 
     public CurrentUserResponse me(CurrentUser currentUser) {
@@ -192,11 +213,56 @@ public class DemoAuthService {
         String accessToken = jwtService.generateAccessToken(currentUser);
         String refreshToken = "ref_" + UUID.randomUUID().toString().replace("-", "");
         Instant expiredAt = Instant.now().plusSeconds(refreshTokenTtlSeconds);
-        SessionState sessionState = new SessionState(accessToken, refreshToken, expiredAt, authUser);
-        accessSessions.put(accessToken, sessionState);
-        refreshIndex.put(refreshToken, accessToken);
+        jdbcTemplate.update("""
+                        insert into erp_auth_sessions (access_token, refresh_token, username, expired_at, created_at)
+                        values (?, ?, ?, ?, ?)
+                        """,
+                accessToken,
+                refreshToken,
+                authUser.username(),
+                Timestamp.from(expiredAt),
+                Timestamp.from(Instant.now())
+        );
 
         return new LoginResponse(accessToken, refreshToken, 7200L, authUser.userId(), authUser.displayName(), authUser.userType());
+    }
+
+    private SessionState sessionByAccessToken(String accessToken) {
+        List<SessionState> sessions = jdbcTemplate.query("""
+                        select access_token, refresh_token, username, expired_at
+                        from erp_auth_sessions
+                        where access_token = ?
+                        """,
+                (rs, rowNum) -> new SessionState(
+                        rs.getString("access_token"),
+                        rs.getString("refresh_token"),
+                        rs.getTimestamp("expired_at").toInstant(),
+                        rs.getString("username")
+                ),
+                accessToken
+        );
+        return sessions.isEmpty() ? null : sessions.get(0);
+    }
+
+    private SessionState sessionByRefreshToken(String refreshToken) {
+        List<SessionState> sessions = jdbcTemplate.query("""
+                        select access_token, refresh_token, username, expired_at
+                        from erp_auth_sessions
+                        where refresh_token = ?
+                        """,
+                (rs, rowNum) -> new SessionState(
+                        rs.getString("access_token"),
+                        rs.getString("refresh_token"),
+                        rs.getTimestamp("expired_at").toInstant(),
+                        rs.getString("username")
+                ),
+                refreshToken
+        );
+        return sessions.isEmpty() ? null : sessions.get(0);
+    }
+
+    private void cleanupExpiredSessions() {
+        jdbcTemplate.update("delete from erp_auth_sessions where expired_at < ?", Timestamp.from(Instant.now()));
     }
 
     private List<MenuItemDto> studentMenus() {
@@ -238,7 +304,7 @@ public class DemoAuthService {
         );
     }
 
-    private record SessionState(String accessToken, String refreshToken, Instant expiredAt, AuthUser authUser) {
+    private record SessionState(String accessToken, String refreshToken, Instant expiredAt, String username) {
     }
 
     private record AuthUser(

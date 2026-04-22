@@ -263,6 +263,8 @@ import MetricCard from '../components/common/MetricCard.vue'
 import PageHeader from '../components/common/PageHeader.vue'
 import PageSection from '../components/common/PageSection.vue'
 import StatusTag from '../components/common/StatusTag.vue'
+import { statusMeta } from '../constants/status'
+import { downloadCsv, todayFileToken } from '../lib/export'
 import { showRequestError } from '../lib/feedback'
 import { useAppStore } from '../stores/app'
 import type { BillRecord, DashboardMetric } from '../types'
@@ -435,7 +437,27 @@ const submitReceipt = async () => {
 }
 
 const handleExport = () => {
-  ElMessage.info('对账单导出待后续接入文件导出服务。')
+  const rows = filteredBills.value
+
+  if (!rows.length) {
+    ElMessage.warning('当前筛选条件下没有可导出的账单。')
+    return
+  }
+
+  downloadCsv(`账单对账单-${todayFileToken()}.csv`, rows, [
+    { header: '序号', value: (_row, index) => index + 1 },
+    { header: '账单编号', value: (bill) => bill.billNo },
+    { header: '学生姓名', value: (bill) => bill.studentName },
+    { header: '学号', value: (bill) => bill.studentNo },
+    { header: '班级', value: (bill) => bill.className },
+    { header: '费用项目', value: (bill) => bill.feeItemName },
+    { header: '应收金额', value: (bill) => bill.receivableAmount },
+    { header: '已收金额', value: (bill) => bill.receivedAmount },
+    { header: '待缴金额', value: (bill) => outstandingAmount(bill) },
+    { header: '到期日期', value: (bill) => bill.dueDate },
+    { header: '账单状态', value: (bill) => statusLabel(bill.status) },
+  ])
+  ElMessage.success(`已导出 ${rows.length} 笔账单。`)
 }
 
 const handleSelectionChange = (rows: BillRecord[]) => {
@@ -486,6 +508,8 @@ const handleBatchRemind = async () => {
 const isBillSelectable = (bill: BillRecord) => outstandingAmount(bill) > 0
 
 const outstandingAmount = (bill: BillRecord) => bill.receivableAmount - bill.receivedAmount
+
+const statusLabel = (status: string) => statusMeta[status]?.label ?? status
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('zh-CN', {

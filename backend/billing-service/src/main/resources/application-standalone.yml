@@ -1,4 +1,1 @@
-spring:
-  autoconfigure:
-    exclude:
-      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+# Standalone profile now uses the datasource declared in application.yml.
