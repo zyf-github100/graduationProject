@@ -34,6 +34,11 @@ public class NotifyController {
         return ApiResponse.success(notifyTemplateService.studentNotices(), "Query successful", requestId(request));
     }
 
+    @PostMapping("/student/notices/{noticeId}/read")
+    public ApiResponse<?> markStudentNoticeRead(@PathVariable Long noticeId, HttpServletRequest request) {
+        return ApiResponse.success(notifyTemplateService.markStudentNoticeRead(noticeId), "Notice marked as read", requestId(request));
+    }
+
     @GetMapping("/teacher/notices")
     public ApiResponse<?> teacherNotices(HttpServletRequest request) {
         return ApiResponse.success(notifyTemplateService.teacherNotices(), "Query successful", requestId(request));

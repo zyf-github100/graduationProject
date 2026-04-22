@@ -1,18 +1,44 @@
 package com.schoolerp.academic.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schoolerp.academic.client.MasterProfileClient;
+import jakarta.annotation.PostConstruct;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Service
 public class AcademicOverviewService {
-    private final MasterProfileClient masterProfileClient;
+    private static final TypeReference<LinkedHashMap<String, Object>> MAP_PAYLOAD_TYPE = new TypeReference<>() {
+    };
 
-    public AcademicOverviewService(MasterProfileClient masterProfileClient) {
+    private final MasterProfileClient masterProfileClient;
+    private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper;
+
+    public AcademicOverviewService(MasterProfileClient masterProfileClient,
+                                   JdbcTemplate jdbcTemplate,
+                                   ObjectMapper objectMapper) {
         this.masterProfileClient = masterProfileClient;
+        this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
+    }
+
+    @PostConstruct
+    public void initializeStorage() {
+        jdbcTemplate.execute("""
+                create table if not exists erp_academic_payloads (
+                    payload_key varchar(128) primary key,
+                    payload_json jsonb not null,
+                    updated_at varchar(64) not null
+                )
+                """);
+        seedAcademicPayloads();
     }
 
     public Map<String, Object> overview() {
@@ -41,65 +67,17 @@ public class AcademicOverviewService {
     }
 
     public Map<String, Object> studentHome() {
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("metrics", List.of(
-                metric("今日课程", "4 节", "下午还有 2 节课", "第 3 节 Java 程序设计 13:30 开始", "primary", "up", List.of(26, 28, 30, 31, 29, 33, 34, 36)),
-                metric("本周签到", "100%", "连续 12 次课程签到正常", "今日上午签到与实验课签到已完成", "success", "up", List.of(82, 84, 87, 88, 91, 93, 95, 98)),
-                metric("待缴费用", "¥1,800", "住宿费 04-25 截止", "当前有 1 笔账单待处理", "warning", "flat", List.of(58, 58, 56, 55, 55, 52, 50, 50)),
-                metric("未读通知", "4 条", "2 条来自教务管理中心", "包含课程考核安排与校园通知", "danger", "up", List.of(12, 18, 14, 19, 16, 20, 24, 27))
-        ));
-        response.put("todayCourses", studentTodayCourses());
-        response.put("upcomingItems", studentUpcomingItems());
-        response.put("timeline", List.of(
-                Map.of("time", "今天 08:00", "content", "完成课程签到", "actor", "学习事务系统"),
-                Map.of("time", "今天 11:45", "content", "Java 实验报告已提交", "actor", "实验平台"),
-                Map.of("time", "今天 15:30", "content", "创新实践周通知已确认", "actor", "第二课堂平台")
-        ));
-        response.put("latestNotices", studentNoticeRecords().subList(0, 3));
+        Map<String, Object> response = payloadMap("student_home");
         response.put("profileSnapshot", loadStudentProfile());
         return response;
     }
 
     public Map<String, Object> studentSchedule() {
-        return Map.of(
-                "summary", List.of(
-                        Map.of("label", "行政班", "value", "2025级软件工程1班"),
-                        Map.of("label", "本周课程", "value", "26 节"),
-                        Map.of("label", "本周重点", "value", "周五 Java 程序设计上机考核")
-                ),
-                "weeklySchedule", List.of(
-                        Map.of("period", "第1节", "time", "08:00 - 08:45", "monday", "高等数学 / 张老师 / A301", "tuesday", "大学英语 / 李老师 / A305", "wednesday", "Java 程序设计 / 刘老师 / A204", "thursday", "数据结构 / 周老师 / 实验楼 201", "friday", "高等数学 / 张老师 / A301"),
-                        Map.of("period", "第2节", "time", "09:00 - 09:45", "monday", "大学英语 / 李老师 / A305", "tuesday", "数据库原理 / 何老师 / 实验楼 203", "wednesday", "高等数学 / 张老师 / A301", "thursday", "离散数学 / 孙老师 / A206", "friday", "计算机网络 / 吴老师 / 实验楼 202"),
-                        Map.of("period", "第3节", "time", "10:05 - 10:50", "monday", "Java 程序设计 / 刘老师 / A204", "tuesday", "高等数学 / 张老师 / A301", "wednesday", "大学英语 / 李老师 / A305", "thursday", "大学体育 / 田老师 / 操场", "friday", "软件工程导论 / 胡老师 / A204"),
-                        Map.of("period", "第4节", "time", "11:00 - 11:45", "monday", "数据结构 / 周老师 / 实验楼 201", "tuesday", "思政课 / 黄老师 / A208", "wednesday", "职业发展指导 / 陈老师 / 一教 203", "thursday", "高等数学 / 张老师 / A301", "friday", "大学英语 / 李老师 / A305"),
-                        Map.of("period", "第5节", "time", "13:30 - 14:15", "monday", "数据库原理 / 何老师 / 实验楼 203", "tuesday", "软件工程导论 / 胡老师 / A204", "wednesday", "数据结构 / 周老师 / 实验楼 201", "thursday", "大学英语 / 李老师 / A305", "friday", "信息安全基础 / 曾老师 / 机房 2"),
-                        Map.of("period", "第6节", "time", "14:30 - 15:15", "monday", "计算机网络 / 吴老师 / 实验楼 202", "tuesday", "大学体育 / 田老师 / 操场", "wednesday", "高等数学 / 张老师 / A301", "thursday", "软件工程导论 / 胡老师 / A204", "friday", "程序设计实践 / 徐老师 / 实训楼 103")
-                ),
-                "todayCourses", studentTodayCourses(),
-                "upcomingItems", studentUpcomingItems()
-        );
+        return payloadMap("student_schedule");
     }
 
     public Map<String, Object> studentScores() {
-        return Map.of(
-                "metrics", List.of(
-                        metric("平均分", "89.3", "较上次阶段考核 +2.6", "本学期已发布 8 门课程成绩", "success", "up", List.of(68, 72, 74, 79, 81, 84, 87, 89)),
-                        metric("专业内排名", "5 / 82", "进入前 10%", "Java 程序设计与英语成绩带动整体提升", "primary", "up", List.of(18, 16, 15, 12, 11, 8, 6, 5)),
-                        metric("待发布课程", "2 门", "数据库原理、计算机网络待录入", "预计本周五前完成发布", "warning", "flat", List.of(6, 5, 5, 4, 4, 3, 3, 2))
-                ),
-                "records", List.of(
-                        Map.of("subject", "高等数学", "continuousScore", 90, "midtermScore", 88, "finalScore", 92, "totalScore", 90, "rank", "7 / 82", "status", "PUBLISHED", "teacherName", "张老师", "comment", "课堂练习与作业完成度稳定，建议继续保持推导书写质量。"),
-                        Map.of("subject", "Java 程序设计", "continuousScore", 95, "midtermScore", 93, "finalScore", 96, "totalScore", 95, "rank", "3 / 82", "status", "PUBLISHED", "teacherName", "刘老师", "comment", "代码规范与问题拆解能力突出，实验报告质量持续稳定。"),
-                        Map.of("subject", "大学英语", "continuousScore", 91, "midtermScore", 87, "finalScore", 93, "totalScore", 90, "rank", "6 / 82", "status", "PUBLISHED", "teacherName", "李老师", "comment", "阅读与口语表现良好，建议继续加强学术写作细节。"),
-                        Map.of("subject", "数据结构", "continuousScore", 86, "midtermScore", 0, "finalScore", 0, "totalScore", 86, "rank", "--", "status", "DRAFT", "teacherName", "周老师", "comment", "实验报告已提交，等待阶段考核成绩发布。"),
-                        Map.of("subject", "数据库原理", "continuousScore", 84, "midtermScore", 0, "finalScore", 0, "totalScore", 84, "rank", "--", "status", "DRAFT", "teacherName", "何老师", "comment", "课程表现稳定，等待本周统一发布阶段成绩。")
-                ),
-                "analysis", List.of(
-                        Map.of("label", "优势课程", "value", "Java 程序设计 95 分，专业第 3 名"),
-                        Map.of("label", "稳定区间", "value", "高等数学、大学英语保持 90 分以上"),
-                        Map.of("label", "待发布课程", "value", "数据结构、数据库原理本周内发布")
-                )
-        );
+        return payloadMap("student_scores");
     }
 
     public Map<String, Object> teacherHome() {
@@ -197,6 +175,105 @@ public class AcademicOverviewService {
                         "成绩提交后将同步到学生端成绩页和专业统计报表。"
                 )
         );
+    }
+
+    private void seedAcademicPayloads() {
+        putPayloadIfAbsent("student_home", seedStudentHomePayload());
+        putPayloadIfAbsent("student_schedule", seedStudentSchedulePayload());
+        putPayloadIfAbsent("student_scores", seedStudentScoresPayload());
+    }
+
+    private Map<String, Object> seedStudentHomePayload() {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("metrics", List.of(
+                metric("今日课程", "4 节", "下午还有 2 节课", "第 3 节 Java 程序设计 13:30 开始", "primary", "up", List.of(26, 28, 30, 31, 29, 33, 34, 36)),
+                metric("本周签到", "100%", "连续 12 次课程签到正常", "今日上午签到与实验课签到已完成", "success", "up", List.of(82, 84, 87, 88, 91, 93, 95, 98)),
+                metric("待缴费用", "¥1,800", "住宿费 04-25 截止", "当前有 1 笔账单待处理", "warning", "flat", List.of(58, 58, 56, 55, 55, 52, 50, 50)),
+                metric("未读通知", "4 条", "2 条来自教务管理中心", "包含课程考核安排与校园通知", "danger", "up", List.of(12, 18, 14, 19, 16, 20, 24, 27))
+        ));
+        response.put("todayCourses", studentTodayCourses());
+        response.put("upcomingItems", studentUpcomingItems());
+        response.put("timeline", List.of(
+                Map.of("time", "今天 08:00", "content", "完成课程签到", "actor", "学习事务系统"),
+                Map.of("time", "今天 11:45", "content", "Java 实验报告已提交", "actor", "实验平台"),
+                Map.of("time", "今天 15:30", "content", "创新实践周通知已确认", "actor", "第二课堂平台")
+        ));
+        response.put("latestNotices", studentNoticeRecords().subList(0, 3));
+        return response;
+    }
+
+    private Map<String, Object> seedStudentSchedulePayload() {
+        return new LinkedHashMap<>(Map.of(
+                "summary", List.of(
+                        Map.of("label", "行政班", "value", "2025级软件工程1班"),
+                        Map.of("label", "本周课程", "value", "26 节"),
+                        Map.of("label", "本周重点", "value", "周五 Java 程序设计上机考核")
+                ),
+                "weeklySchedule", List.of(
+                        Map.of("period", "第1节", "time", "08:00 - 08:45", "monday", "高等数学 / 张老师 / A301", "tuesday", "大学英语 / 李老师 / A305", "wednesday", "Java 程序设计 / 刘老师 / A204", "thursday", "数据结构 / 周老师 / 实验楼 201", "friday", "高等数学 / 张老师 / A301"),
+                        Map.of("period", "第2节", "time", "09:00 - 09:45", "monday", "大学英语 / 李老师 / A305", "tuesday", "数据库原理 / 何老师 / 实验楼 203", "wednesday", "高等数学 / 张老师 / A301", "thursday", "离散数学 / 孙老师 / A206", "friday", "计算机网络 / 吴老师 / 实验楼 202"),
+                        Map.of("period", "第3节", "time", "10:05 - 10:50", "monday", "Java 程序设计 / 刘老师 / A204", "tuesday", "高等数学 / 张老师 / A301", "wednesday", "大学英语 / 李老师 / A305", "thursday", "大学体育 / 田老师 / 操场", "friday", "软件工程导论 / 胡老师 / A204"),
+                        Map.of("period", "第4节", "time", "11:00 - 11:45", "monday", "数据结构 / 周老师 / 实验楼 201", "tuesday", "思政课 / 黄老师 / A208", "wednesday", "职业发展指导 / 陈老师 / 一教 203", "thursday", "高等数学 / 张老师 / A301", "friday", "大学英语 / 李老师 / A305"),
+                        Map.of("period", "第5节", "time", "13:30 - 14:15", "monday", "数据库原理 / 何老师 / 实验楼 203", "tuesday", "软件工程导论 / 胡老师 / A204", "wednesday", "数据结构 / 周老师 / 实验楼 201", "thursday", "大学英语 / 李老师 / A305", "friday", "信息安全基础 / 曾老师 / 机房 2"),
+                        Map.of("period", "第6节", "time", "14:30 - 15:15", "monday", "计算机网络 / 吴老师 / 实验楼 202", "tuesday", "大学体育 / 田老师 / 操场", "wednesday", "高等数学 / 张老师 / A301", "thursday", "软件工程导论 / 胡老师 / A204", "friday", "程序设计实践 / 徐老师 / 实训楼 103")
+                ),
+                "todayCourses", studentTodayCourses(),
+                "upcomingItems", studentUpcomingItems()
+        ));
+    }
+
+    private Map<String, Object> seedStudentScoresPayload() {
+        return new LinkedHashMap<>(Map.of(
+                "metrics", List.of(
+                        metric("平均分", "89.3", "较上次阶段考核 +2.6", "本学期已发布 8 门课程成绩", "success", "up", List.of(68, 72, 74, 79, 81, 84, 87, 89)),
+                        metric("专业内排名", "5 / 82", "进入前 10%", "Java 程序设计与英语成绩带动整体提升", "primary", "up", List.of(18, 16, 15, 12, 11, 8, 6, 5)),
+                        metric("待发布课程", "2 门", "数据库原理、计算机网络待录入", "预计本周五前完成发布", "warning", "flat", List.of(6, 5, 5, 4, 4, 3, 3, 2))
+                ),
+                "records", List.of(
+                        Map.of("subject", "高等数学", "continuousScore", 90, "midtermScore", 88, "finalScore", 92, "totalScore", 90, "rank", "7 / 82", "status", "PUBLISHED", "teacherName", "张老师", "comment", "课堂练习与作业完成度稳定，建议继续保持推导书写质量。"),
+                        Map.of("subject", "Java 程序设计", "continuousScore", 95, "midtermScore", 93, "finalScore", 96, "totalScore", 95, "rank", "3 / 82", "status", "PUBLISHED", "teacherName", "刘老师", "comment", "代码规范与问题拆解能力突出，实验报告质量持续稳定。"),
+                        Map.of("subject", "大学英语", "continuousScore", 91, "midtermScore", 87, "finalScore", 93, "totalScore", 90, "rank", "6 / 82", "status", "PUBLISHED", "teacherName", "李老师", "comment", "阅读与口语表现良好，建议继续加强学术写作细节。"),
+                        Map.of("subject", "数据结构", "continuousScore", 86, "midtermScore", 0, "finalScore", 0, "totalScore", 86, "rank", "--", "status", "DRAFT", "teacherName", "周老师", "comment", "实验报告已提交，等待阶段考核成绩发布。"),
+                        Map.of("subject", "数据库原理", "continuousScore", 84, "midtermScore", 0, "finalScore", 0, "totalScore", 84, "rank", "--", "status", "DRAFT", "teacherName", "何老师", "comment", "课程表现稳定，等待本周统一发布阶段成绩。")
+                ),
+                "analysis", List.of(
+                        Map.of("label", "优势课程", "value", "Java 程序设计 95 分，专业第 3 名"),
+                        Map.of("label", "稳定区间", "value", "高等数学、大学英语保持 90 分以上"),
+                        Map.of("label", "待发布课程", "value", "数据结构、数据库原理本周内发布")
+                )
+        ));
+    }
+
+    private void putPayloadIfAbsent(String key, Map<String, Object> payload) {
+        try {
+            jdbcTemplate.update("""
+                            insert into erp_academic_payloads (payload_key, payload_json, updated_at)
+                            values (?, ?::jsonb, ?)
+                            on conflict (payload_key) do nothing
+                            """,
+                    key,
+                    objectMapper.writeValueAsString(payload),
+                    Instant.now().toString()
+            );
+        } catch (Exception exception) {
+            throw new IllegalStateException("Failed to seed academic payload: " + key, exception);
+        }
+    }
+
+    private Map<String, Object> payloadMap(String key) {
+        List<String> payloads = jdbcTemplate.query(
+                "select payload_json::text from erp_academic_payloads where payload_key = ?",
+                (rs, rowNum) -> rs.getString(1),
+                key
+        );
+        if (payloads.isEmpty()) {
+            throw new IllegalStateException("Academic payload not found: " + key);
+        }
+        try {
+            return objectMapper.readValue(payloads.get(0), MAP_PAYLOAD_TYPE);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Failed to read academic payload: " + key, exception);
+        }
     }
 
     private Map<String, Object> metric(String title,

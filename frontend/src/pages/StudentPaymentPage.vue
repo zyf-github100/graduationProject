@@ -131,6 +131,8 @@ import MetricCard from '../components/common/MetricCard.vue'
 import PageHeader from '../components/common/PageHeader.vue'
 import PageSection from '../components/common/PageSection.vue'
 import StatusTag from '../components/common/StatusTag.vue'
+import { statusMeta } from '../constants/status'
+import { downloadCsv, todayFileToken } from '../lib/export'
 import { showRequestError } from '../lib/feedback'
 import type { BillRecord, DashboardMetric } from '../types'
 
@@ -162,7 +164,22 @@ const loadData = async () => {
 }
 
 const handleDownload = () => {
-  ElMessage.info('下载缴费记录待后续接入文件导出服务。')
+  if (!bills.value.length) {
+    ElMessage.warning('当前没有可下载的缴费记录。')
+    return
+  }
+
+  downloadCsv(`缴费记录-${todayFileToken()}.csv`, bills.value, [
+    { header: '序号', value: (_row, index) => index + 1 },
+    { header: '账单编号', value: (bill) => bill.billNo },
+    { header: '费用项目', value: (bill) => bill.feeItemName },
+    { header: '应缴金额', value: (bill) => bill.receivableAmount },
+    { header: '已缴金额', value: (bill) => bill.receivedAmount },
+    { header: '待缴金额', value: (bill) => outstandingAmount(bill) },
+    { header: '截止日期', value: (bill) => bill.dueDate },
+    { header: '状态', value: (bill) => statusLabel(bill.status) },
+  ])
+  ElMessage.success(`已下载 ${bills.value.length} 笔缴费记录。`)
 }
 
 const handleImmediatePay = () => {
@@ -213,6 +230,8 @@ const submitPayment = async () => {
 }
 
 const outstandingAmount = (bill: BillRecord) => bill.receivableAmount - bill.receivedAmount
+
+const statusLabel = (status: string) => statusMeta[status]?.label ?? status
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('zh-CN', {

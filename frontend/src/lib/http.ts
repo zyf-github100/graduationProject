@@ -1,6 +1,7 @@
 import type { LoginResponse } from '../types'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+const CONFIGURED_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+const API_BASE_URL = import.meta.env.DEV ? '' : CONFIGURED_API_BASE_URL
 const ACCESS_TOKEN_KEY = 'school-erp.access-token'
 const REFRESH_TOKEN_KEY = 'school-erp.refresh-token'
 

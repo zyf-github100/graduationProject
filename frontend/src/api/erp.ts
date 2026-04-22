@@ -465,6 +465,11 @@ export const fetchStudentBillingOverview = () =>
 export const fetchStudentNotices = () =>
   request<StudentNoticeCenterData>('/api/v1/notify/student/notices')
 
+export const markStudentNoticeRead = (noticeId: number) =>
+  request<StudentNotice>(`/api/v1/notify/student/notices/${noticeId}/read`, {
+    method: 'POST',
+  })
+
 export const fetchStudentProfile = (studentNo: string) =>
   request<StudentProfileData>('/api/v1/master/student/profile', {
     query: { studentNo },

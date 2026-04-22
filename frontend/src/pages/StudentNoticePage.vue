@@ -37,7 +37,17 @@
             <div class="notice-card__summary">{{ notice.summary }}</div>
             <div class="notice-card__footer">
               <span>{{ notice.publisher }}</span>
-              <el-button text type="primary">{{ notice.isRead ? '查看详情' : '标记已读' }}</el-button>
+              <div class="notice-card__actions">
+                <el-button text type="primary" @click="openDetail(notice)">查看详情</el-button>
+                <el-button
+                  v-if="!notice.isRead"
+                  text
+                  :loading="markingNoticeId === notice.id"
+                  @click="markAsRead(notice)"
+                >
+                  标记已读
+                </el-button>
+              </div>
             </div>
           </div>
         </div>
@@ -70,22 +80,73 @@
         </PageSection>
       </div>
     </div>
+
+    <el-dialog v-model="detailVisible" title="通知详情" width="640px">
+      <template v-if="activeNotice">
+        <div class="notice-detail">
+          <div class="notice-detail__head">
+            <div>
+              <div class="notice-detail__meta">
+                <span class="notice-card__category">{{ activeNotice.category }}</span>
+                <span v-if="activeNotice.priority === 'high'" class="notice-card__priority">重要</span>
+              </div>
+              <h2>{{ activeNotice.title }}</h2>
+            </div>
+            <el-tag :type="activeNotice.isRead ? 'success' : 'warning'" round>
+              {{ activeNotice.isRead ? '已读' : '未读' }}
+            </el-tag>
+          </div>
+
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="发布单位">{{ activeNotice.publisher }}</el-descriptions-item>
+            <el-descriptions-item label="发布时间">{{ activeNotice.publishTime }}</el-descriptions-item>
+          </el-descriptions>
+
+          <div class="notice-detail__body">{{ activeNotice.summary }}</div>
+        </div>
+      </template>
+
+      <template #footer>
+        <div class="toolbar-inline">
+          <el-button @click="detailVisible = false">关闭</el-button>
+          <el-button
+            v-if="activeNotice && !activeNotice.isRead"
+            type="primary"
+            :loading="markingNoticeId === activeNotice.id"
+            @click="markAsRead(activeNotice)"
+          >
+            标记已读
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { fetchStudentNotices, type ActivityItem, type NoticeCategorySummary } from '../api/erp'
+import { ElMessage } from 'element-plus'
+import {
+  fetchStudentNotices,
+  markStudentNoticeRead,
+  type ActivityItem,
+  type NoticeCategorySummary,
+} from '../api/erp'
 import PageHeader from '../components/common/PageHeader.vue'
 import PageSection from '../components/common/PageSection.vue'
 import { showRequestError } from '../lib/feedback'
+import { useAppStore } from '../stores/app'
 import type { StudentNotice } from '../types'
 
+const store = useAppStore()
 const activeTab = ref('all')
 const records = ref<StudentNotice[]>([])
 const timeline = ref<ActivityItem[]>([])
 const categorySummary = ref<NoticeCategorySummary[]>([])
 const unreadCount = ref(0)
+const activeNotice = ref<StudentNotice | null>(null)
+const detailVisible = ref(false)
+const markingNoticeId = ref<number | null>(null)
 
 const filteredNotices = computed(() => {
   if (activeTab.value === 'unread') {
@@ -105,6 +166,52 @@ const loadData = async () => {
   } catch (error) {
     showRequestError(error, '学生通知加载失败。')
   }
+}
+
+const openDetail = (notice: StudentNotice) => {
+  activeNotice.value = notice
+  detailVisible.value = true
+}
+
+const markAsRead = async (notice: StudentNotice) => {
+  if (notice.isRead) {
+    return
+  }
+
+  markingNoticeId.value = notice.id
+  try {
+    const updated = await markStudentNoticeRead(notice.id)
+    records.value = records.value.map((item) => (item.id === updated.id ? updated : item))
+    if (activeNotice.value?.id === updated.id) {
+      activeNotice.value = updated
+    }
+    refreshNoticeSummary()
+    await store.refreshPortalIndicators('/student/notices')
+    ElMessage.success('通知已标记为已读。')
+  } catch (error) {
+    showRequestError(error, '标记已读失败。')
+  } finally {
+    markingNoticeId.value = null
+  }
+}
+
+const refreshNoticeSummary = () => {
+  unreadCount.value = records.value.filter((item) => !item.isRead).length
+  const summary = new Map<string, { total: number; unread: number }>()
+
+  records.value.forEach((notice) => {
+    const item = summary.get(notice.category) ?? { total: 0, unread: 0 }
+    item.total += 1
+    if (!notice.isRead) {
+      item.unread += 1
+    }
+    summary.set(notice.category, item)
+  })
+
+  categorySummary.value = Array.from(summary.entries()).map(([category, item]) => ({
+    category,
+    label: `${item.unread} 条未读 / 共 ${item.total} 条`,
+  }))
 }
 
 onMounted(loadData)
@@ -143,11 +250,16 @@ onMounted(loadData)
 
 .notice-card__head,
 .notice-card__footer,
+.notice-card__actions,
 .category-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.notice-card__actions {
+  justify-content: flex-end;
 }
 
 .notice-card__meta {
@@ -217,5 +329,39 @@ onMounted(loadData)
 
 .activity-item__actor {
   margin-top: 6px;
+}
+
+.notice-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.notice-detail__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.notice-detail__head h2 {
+  margin: 12px 0 0;
+  color: var(--erp-color-text-primary);
+  font-size: 22px;
+  line-height: 1.4;
+}
+
+.notice-detail__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notice-detail__body {
+  padding: 18px;
+  border-radius: 14px;
+  color: var(--erp-color-text-secondary);
+  line-height: 1.8;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 </style>
